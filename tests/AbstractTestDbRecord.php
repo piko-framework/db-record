@@ -200,4 +200,29 @@ abstract class AbstractTestDbRecord extends TestCase
         $model->bind($data);
         $this->assertEquals($data, $model->toArray());
     }
+
+    #[DataProvider('contactProvider')]
+    public function testModelBindWithStringValues($className)
+    {
+        $model = new $className(self::$db);
+
+        $model->bind([
+            'id' => '1',
+            'name' => 'John Lennon',
+            'firstname' => 'John',
+            'lastname' => 'Lennon',
+            'age' => '45',
+            'order' => '1',
+            'active' => 'false',
+            'active2' => 'true',
+            'income' => '20230.95',
+        ]);
+
+        $this->assertSame(1, $model->id);
+        $this->assertSame(45, $model->age);
+        $this->assertSame(1, $model->order);
+        $this->assertFalse($model->active);
+        $this->assertTrue($model->active2);
+        $this->assertEquals(20230.95, $model->income);
+    }
 }
