@@ -135,7 +135,7 @@ abstract class DbRecord
      * @throws RuntimeException
      * @see DbRecord::$schema
      */
-    protected function checkColumn(string $name)
+    protected function checkColumn(string $name): void
     {
         if (!isset($this->schema[$name])) {
             throw new RuntimeException("$name is not in the table schema.");
@@ -215,32 +215,42 @@ abstract class DbRecord
      *
      * @return void
      */
-    public function __set(string $attribute, $value)
+    public function __set(string $attribute, $value): void
     {
         $this->checkColumn($attribute);
 
-        $this->data[$attribute] = $value;
+        $shemaType = $this->schema[$attribute];
+
+        $castBooleanValue = function ($value): bool {
+            if (is_bool($value)) {
+                return $value;
+            }
+
+            $filtered = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+            if ($filtered !== null) {
+                return $filtered;
+            }
+
+            return (bool) $value;
+        };
+
+        $this->data[$attribute] = match ($shemaType) {
+            self::TYPE_INT => (int) $value,
+            self::TYPE_BOOL => $castBooleanValue($value),
+            self::TYPE_STRING => (string) $value,
+            default => throw new InvalidArgumentException("Unsupported type: $shemaType") // @codeCoverageIgnore
+        };
     }
 
     /**
-     * Magick method to check if attribute is defined in row's data.
+     * Magick method to check if attribute is defined in the table schema.
      *
      * @param string $attribute The attribute's name.
      */
-    public function __isset(string $attribute)
+    public function __isset(string $attribute): bool
     {
-        return isset($this->data[$attribute]);
-    }
-
-    /** Magick method to unset attribute in row's data.
-     *
-     * @param string $attribute The attribute's name.
-     */
-    public function __unset(string $attribute)
-    {
-        if (isset($this->data[$attribute])) {
-            unset($this->data[$attribute]);
-        }
+        return isset($this->schema[$attribute]);
     }
 
     /**

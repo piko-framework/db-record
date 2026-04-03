@@ -83,15 +83,6 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testUnset($className)
-    {
-        $contact = $this->createContact($className);
-        unset($contact->order);
-        $this->assertFalse(isset($contact->order));
-        $this->assertNull($contact->order);
-    }
-
-    #[DataProvider('contactProvider')]
     public function testUpdate($className)
     {
         $this->createContact($className);
@@ -224,5 +215,27 @@ abstract class AbstractTestDbRecord extends TestCase
         $this->assertFalse($model->active);
         $this->assertTrue($model->active2);
         $this->assertEquals(20230.95, $model->income);
+    }
+
+    #[DataProvider('contactProvider')]
+    public function testModelBindWithBooleanValues($className)
+    {
+        $model = new $className(self::$db);
+
+        $model->bind([
+            'active' => 0,
+            'active2' => 1,
+        ]);
+
+        $this->assertFalse($model->active);
+        $this->assertTrue($model->active2);
+
+        $model->bind([
+            'active' => [],
+            'active2' => [1],
+        ]);
+
+        $this->assertFalse($model->active);
+        $this->assertTrue($model->active2);
     }
 }
