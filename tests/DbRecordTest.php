@@ -123,8 +123,7 @@ class DbRecordTest extends TestCase
 
     protected function createContact($className): object
     {
-        $db = static::getPDO();
-        $contact = new $className($db);
+        $contact = TestContext::getContainer()?->get($className);
         $contact->firstname = 'Sylvain';
         $contact->lastname = 'Philip';
         $contact->order = 1; // order is a reserved word
@@ -165,10 +164,10 @@ class DbRecordTest extends TestCase
 
     public function testLoadWithWrongPrimaryKey(): void
     {
-        $db = static::getPDO();
+        $contact = TestContext::getContainer()?->get(Contact2::class);
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/primary key contact_id is not defined/');
-        (new Contact2($db))->load(1);
+        $contact->load(1);
     }
 
     #[DataProvider('contactProvider')]
@@ -191,15 +190,16 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testUpdate($className): void
     {
-        $db = static::getPDO();
         $this->createContact($className);
-        $contact = (new Contact($db))->load(1);
+        $contact = TestContext::getContainer()?->get($className);
+        $contact->load(1);
         $this->assertEquals('Sylvain', $contact->firstname);
 
         $contact->firstname .= ' updated';
         $contact->save();
 
-        $contact = (new Contact($db))->load(1);
+        $contact = TestContext::getContainer()?->get($className);
+        $contact->load(1);
         $this->assertEquals('Sylvain updated', $contact->firstname);
     }
 
@@ -227,21 +227,20 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testDelete($className): void
     {
-        $db = static::getPDO();
         $contact = $this->createContact($className);
         $this->assertEquals(1, $contact->id);
         $contact->delete();
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Error while trying to load item 1');
-        $contact = (new Contact($db))->load(1);
+        $contact = TestContext::getContainer()?->get($className);
+        $contact->load(1);
     }
 
     #[DataProvider('contactProvider')]
     public function testDeleteNotLoaded($className): void
     {
-        $db = static::getPDO();
-        $contact = new $className($db);
+        $contact = TestContext::getContainer()?->get($className);
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Item cannot be delete because it is not loaded.');
         $contact->delete();
@@ -263,8 +262,7 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testModelValidation($className): void
     {
-        $db = static::getPDO();
-        $model = new $className($db);
+        $model = TestContext::getContainer()?->get($className);
 
         $this->assertFalse($model->isValid());
 
@@ -273,7 +271,7 @@ class DbRecordTest extends TestCase
         $this->assertArrayHasKey('firstname', $errors);
         $this->assertArrayHasKey('lastname', $errors);
 
-        $model = new $className($db);
+        $model = TestContext::getContainer()?->get($className);
 
         $model->firstname = 'John';
         $model->lastname = 'Lennon';
@@ -284,9 +282,7 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testModelBind($className): void
     {
-        $db = static::getPDO();
-        $model = new $className($db);
-
+        $model = TestContext::getContainer()?->get($className);
         $data = [
             'id' => 1,
             'name' => 'John Lennon',
@@ -306,8 +302,7 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testModelBindWithStringValues($className): void
     {
-        $db = static::getPDO();
-        $model = new $className($db);
+        $model = TestContext::getContainer()?->get($className);
 
         $model->bind([
             'id' => '1',
@@ -332,8 +327,7 @@ class DbRecordTest extends TestCase
     #[DataProvider('contactProvider')]
     public function testModelBindWithBooleanValues($className): void
     {
-        $db = static::getPDO();
-        $model = new $className($db);
+        $model = TestContext::getContainer()?->get($className);
 
         $model->bind([
             'active' => 0,
