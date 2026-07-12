@@ -275,7 +275,7 @@ abstract class DbRecord
 
         $query = 'SELECT ' . implode(',', $cols) . ' FROM '
                . $this->quoteIdentifier($this->tableName)
-               . ' WHERE ' . $this->primaryKey . ' = ?';
+               . ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?';
 
         $st = $this->db->prepare($query);
         $st->setFetchMode(PDO::FETCH_INTO, $this);
@@ -377,7 +377,7 @@ abstract class DbRecord
             }
 
             $query = 'UPDATE ' . $this->quoteIdentifier($this->tableName) . ' SET ' . implode(', ', $valueKeys);
-            $query .= ' WHERE ' . $this->primaryKey . ' = ' . (int) $this->{$this->primaryKey};
+            $query .= ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ' . (int) $this->{$this->primaryKey};
         }
 
         $st = $this->db->prepare($query);
@@ -414,7 +414,8 @@ abstract class DbRecord
         }
 
         $st = $this->db->prepare(
-            'DELETE FROM ' . $this->quoteIdentifier($this->tableName) . ' WHERE ' . $this->primaryKey . ' = ?'
+            'DELETE FROM ' . $this->quoteIdentifier($this->tableName) .
+            ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?'
         );
         $id = $this->{$this->primaryKey};
         $st->bindParam(1, $id, PDO::PARAM_INT);
