@@ -4,22 +4,127 @@ namespace Piko\Tests;
 use PDO;
 use RuntimeException;
 use TypeError;
-use Piko\Tests\Contact;
-use Piko\Tests\Contact2;
-use Piko\Tests\ContactLegacy;
+use Piko\Tests\Models\Contact;
+use Piko\Tests\Models\Contact2;
+use Piko\Tests\Models\ContactLegacy;
+use Piko\Tests\Infrastructure\TestContext;
 use PHPUnit\Framework\TestCase;
 use Piko\DbRecord\Event\BeforeSaveEvent;
 use Piko\DbRecord\Event\BeforeDeleteEvent;
 use PHPUnit\Framework\Attributes\DataProvider;
 
-abstract class AbstractTestDbRecord extends TestCase
+class DbRecordTest extends TestCase
 {
-    protected static ?PDO $db = null;
+    const SETUP_SQLITE = '
+        CREATE TABLE contact (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            firstname TEXT,
+            lastname TEXT,
+            age INTEGER,
+            `order` INTEGER,
+            active INTEGER DEFAULT 0,
+            active2 INTEGER DEFAULT 1,
+            income REAL DEFAULT 0
+        );
+    ';
 
-    protected function createContact($className)
+    const SETUP_MYSQL = '
+        CREATE TABLE IF NOT EXISTS contact (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(255) NULL,
+            firstname VARCHAR(255),
+            lastname VARCHAR(255),
+            age INT,
+            `order` INT,
+            active INT DEFAULT 0,
+            active2 TINYINT DEFAULT 1,
+            income FLOAT DEFAULT 0
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    ';
+
+    const SETUP_MSSQL = '
+        CREATE TABLE contact (
+            id INT IDENTITY(1,1) PRIMARY KEY,
+            name NVARCHAR(255) NULL,
+            firstname NVARCHAR(255),
+            lastname NVARCHAR(255),
+            age INT NULL,
+            [order] INT,
+            active BIT DEFAULT 0 NULL,
+            active2 BIT DEFAULT 1,
+            income FLOAT DEFAULT 0
+        );
+    ';
+
+    const SETUP_POSTGRESQL = '
+        CREATE TABLE IF NOT EXISTS contact (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255),
+            firstname VARCHAR(255),
+            lastname VARCHAR(255),
+            age INT,
+            "order" INT,
+            active BOOLEAN DEFAULT FALSE,
+            active2 BOOLEAN DEFAULT TRUE,
+            income FLOAT DEFAULT 0
+        );
+    ';
+
+    private static function getPDO(): PDO
     {
-        $contact = new $className(self::$db);
-        // $contact->name = 'Toto';
+        $pdo = TestContext::getContainer()?->get(PDO::class);
+
+        if (!$pdo instanceof PDO) {
+            throw new RuntimeException('PDO driver not configured');
+        }
+
+        return $pdo;
+    }
+
+    public static function setUpBeforeClass(): void
+    {
+        $db = static::getPDO();
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        match($driver) {
+            'sqlite' => $db->exec(DbRecordTest::SETUP_SQLITE),
+            'mysql' => $db->exec(DbRecordTest::SETUP_MYSQL),
+            'dblib' => $db->exec(DbRecordTest::SETUP_MSSQL),
+            'pgsql' => $db->exec(DbRecordTest::SETUP_POSTGRESQL),
+            default => throw new RuntimeException('Unknown database driver')
+        };
+    }
+
+    public static function tearDownAfterClass(): void
+    {
+        $db = static::getPDO();
+        $db->exec('DROP TABLE contact');
+    }
+
+    protected function setUp(): void
+    {
+        $db = static::getPDO();
+        $driver = $db->getAttribute(PDO::ATTR_DRIVER_NAME);
+
+        $sqliteSetup = function(PDO $db) {
+            $db->exec('DELETE FROM contact');
+            $db->exec("DELETE FROM SQLITE_SEQUENCE WHERE name='contact'"); // Reset primaryu key
+        };
+
+        match($driver) {
+            'sqlite' => $sqliteSetup($db),
+            'mysql' => $db->exec('TRUNCATE contact'),
+            'mssql' => $db->exec('TRUNCATE TABLE contact'),
+            'pgsql' => $db->exec('TRUNCATE TABLE contact RESTART IDENTITY'),
+            default => throw new RuntimeException('Unknown database driver')
+        };
+    }
+
+    protected function createContact($className): object
+    {
+        $db = static::getPDO();
+        $contact = new $className($db);
         $contact->firstname = 'Sylvain';
         $contact->lastname = 'Philip';
         $contact->order = 1; // order is a reserved word
@@ -29,7 +134,7 @@ abstract class AbstractTestDbRecord extends TestCase
         return $contact;
     }
 
-    public static function contactProvider()
+    public static function contactProvider(): array
     {
         return [
             [Contact::class],
@@ -37,20 +142,20 @@ abstract class AbstractTestDbRecord extends TestCase
         ];
     }
 
-    public function testWithNullDb()
+    public function testWithNullDb(): void
     {
         $this->expectException(TypeError::class);
         new Contact(null);
     }
 
-    public function testWithWrongDb()
+    public function testWithWrongDb(): void
     {
         $this->expectException(TypeError::class);
         new Contact(new \DateTime());
     }
 
     #[DataProvider('contactProvider')]
-    public function testCreate($className)
+    public function testCreate($className): void
     {
         $contact = $this->createContact($className);
         $this->assertEquals(1, $contact->id);
@@ -58,15 +163,16 @@ abstract class AbstractTestDbRecord extends TestCase
         $this->assertEquals('Philip', $contact->lastname);
     }
 
-    public function testLoadWithWrongPrimaryKey()
+    public function testLoadWithWrongPrimaryKey(): void
     {
+        $db = static::getPDO();
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/primary key contact_id is not defined/');
-        (new Contact2(self::$db))->load(1);
+        (new Contact2($db))->load(1);
     }
 
     #[DataProvider('contactProvider')]
-    public function testWrongColumnAccess($className)
+    public function testWrongColumnAccess($className): void
     {
         $contact = $this->createContact($className);
         $this->expectException(RuntimeException::class);
@@ -75,7 +181,7 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testIsset($className)
+    public function testIsset($className): void
     {
         $contact = $this->createContact($className);
         $this->assertTrue(isset($contact->order));
@@ -83,21 +189,22 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testUpdate($className)
+    public function testUpdate($className): void
     {
+        $db = static::getPDO();
         $this->createContact($className);
-        $contact = (new Contact(self::$db))->load(1);
+        $contact = (new Contact($db))->load(1);
         $this->assertEquals('Sylvain', $contact->firstname);
 
         $contact->firstname .= ' updated';
         $contact->save();
 
-        $contact = (new Contact(self::$db))->load(1);
+        $contact = (new Contact($db))->load(1);
         $this->assertEquals('Sylvain updated', $contact->firstname);
     }
 
     #[DataProvider('contactProvider')]
-    public function testBeforeSave($className)
+    public function testBeforeSave($className): void
     {
         $contact = $this->createContact($className);
         $contact->on(BeforeSaveEvent::class, function(BeforeSaveEvent $event) {
@@ -108,7 +215,7 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testBeforeSaveFalse($className)
+    public function testBeforeSaveFalse($className): void
     {
         $contact = $this->createContact($className);
         $contact->on(BeforeSaveEvent::class, function(BeforeSaveEvent $event) {
@@ -118,28 +225,30 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testDelete($className)
+    public function testDelete($className): void
     {
+        $db = static::getPDO();
         $contact = $this->createContact($className);
         $this->assertEquals(1, $contact->id);
         $contact->delete();
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Error while trying to load item 1');
-        $contact = (new Contact(self::$db))->load(1);
+        $contact = (new Contact($db))->load(1);
     }
 
     #[DataProvider('contactProvider')]
-    public function testDeleteNotLoaded($className)
+    public function testDeleteNotLoaded($className): void
     {
-        $contact = new $className(self::$db);
+        $db = static::getPDO();
+        $contact = new $className($db);
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('Item cannot be delete because it is not loaded.');
         $contact->delete();
     }
 
     #[DataProvider('contactProvider')]
-    public function testBeforeDelete($className)
+    public function testBeforeDelete($className): void
     {
         $contact = $this->createContact($className);
         $contact->on(BeforeDeleteEvent::class, function(BeforeDeleteEvent $event) {
@@ -152,9 +261,10 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testModelValidation($className)
+    public function testModelValidation($className): void
     {
-        $model = new $className(self::$db);
+        $db = static::getPDO();
+        $model = new $className($db);
 
         $this->assertFalse($model->isValid());
 
@@ -163,7 +273,7 @@ abstract class AbstractTestDbRecord extends TestCase
         $this->assertArrayHasKey('firstname', $errors);
         $this->assertArrayHasKey('lastname', $errors);
 
-        $model = new $className(self::$db);
+        $model = new $className($db);
 
         $model->firstname = 'John';
         $model->lastname = 'Lennon';
@@ -172,9 +282,10 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testModelBind($className)
+    public function testModelBind($className): void
     {
-        $model = new $className(self::$db);
+        $db = static::getPDO();
+        $model = new $className($db);
 
         $data = [
             'id' => 1,
@@ -193,9 +304,10 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testModelBindWithStringValues($className)
+    public function testModelBindWithStringValues($className): void
     {
-        $model = new $className(self::$db);
+        $db = static::getPDO();
+        $model = new $className($db);
 
         $model->bind([
             'id' => '1',
@@ -218,9 +330,10 @@ abstract class AbstractTestDbRecord extends TestCase
     }
 
     #[DataProvider('contactProvider')]
-    public function testModelBindWithBooleanValues($className)
+    public function testModelBindWithBooleanValues($className): void
     {
-        $model = new $className(self::$db);
+        $db = static::getPDO();
+        $model = new $className($db);
 
         $model->bind([
             'active' => 0,

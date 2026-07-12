@@ -1,5 +1,5 @@
 <?php
-namespace Piko\Tests;
+namespace Piko\Tests\Models;
 
 class ContactLegacy extends \Piko\DbRecord
 {

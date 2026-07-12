@@ -5,3 +5,4 @@ composer.lock
 phpunit.xml
 .phpunit.cache
 .phpactor.json
+env.php

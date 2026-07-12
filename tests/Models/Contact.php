@@ -1,5 +1,5 @@
 <?php
-namespace Piko\Tests;
+namespace Piko\Tests\Models;
 
 use Piko\DbRecord\Attribute\Table;
 use Piko\DbRecord\Attribute\Column;
