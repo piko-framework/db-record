@@ -69,7 +69,7 @@ final class StartedSubscriber implements PHPUnitStartedSubscriber
         $database = $this->params['DATABASE_NAME'] ?? 'test';
         $user = $this->params['POSTGRESQL_USER'] ?? 'root';
         $password = $this->params['POSTGRESQL_PASSWORD'] ?? 'root';
-        $db = new PDO('pgsql:host=' . $host, $user, $password);
+        $db = new PDO("pgsql:host={$host};dbname=postgres", $user, $password);
 
         // Check if the database already exists
         $result = $db->query("SELECT 1 FROM pg_database WHERE datname='{$database}'");
