@@ -36,12 +36,18 @@
 		"league/container": "^5.2"
 	},
 	"scripts" : {
-		"test" : [
-			"@phpunit",
+		"tests" : [
+			"@phpunit:sqlite",
+			"@phpunit:mysql",
+			"@phpunit:mssql",
+			"@phpunit:pgsql",
 			"@phpcs",
 			"@phpstan"
 		],
-		"phpunit" : "phpunit",
+		"phpunit:sqlite" : "XDEBUG_MODE=coverage DB_DRIVER=sqlite phpunit",
+		"phpunit:mysql" : "XDEBUG_MODE=coverage DB_DRIVER=mysql phpunit",
+		"phpunit:mssql" : "XDEBUG_MODE=coverage DB_DRIVER=mssql phpunit",
+		"phpunit:pgsql" : "XDEBUG_MODE=coverage DB_DRIVER=pgsql phpunit",
 		"phpcs" : "phpcs --standard=vendor/piko/core/coding-standard  src",
 		"phpstan" : "phpstan"
 	}
