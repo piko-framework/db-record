@@ -115,7 +115,7 @@ class DbRecordTest extends TestCase
         match($driver) {
             'sqlite' => $sqliteSetup($db),
             'mysql' => $db->exec('TRUNCATE contact'),
-            'mssql' => $db->exec('TRUNCATE TABLE contact'),
+            'dblib' => $db->exec('TRUNCATE TABLE contact'),
             'pgsql' => $db->exec('TRUNCATE TABLE contact RESTART IDENTITY'),
             default => throw new RuntimeException('Unknown database driver')
         };
