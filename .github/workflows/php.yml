@@ -86,12 +86,13 @@ jobs:
       run: |
         mkdir -p build/logs
         if [ "${{ matrix.db }}" = "sqlite" ]; then
-          XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-clover build/logs/clover.xml
+          XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-clover clover.xml
         else
-          vendor/bin/phpunit
+          vendor/bin/phpunit --no-coverage
         fi
 
     - name: Upload coverage results to Coveralls
+      if: matrix.db == 'sqlite'
       env:
         COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
