@@ -44,7 +44,7 @@ abstract class DbRecord
      *
      * @var PDO
      */
-    protected $db;
+    protected PDO $db;
 
     /**
      * The name of the table.
@@ -257,11 +257,11 @@ abstract class DbRecord
     /**
      * Load row data.
      *
-     * @param number $id The value of the row primary key.
+     * @param int|string $id The value of the row primary key.
      * @return static
      * @throws RuntimeException
      */
-    public function load($id = 0): DbRecord
+    public function load(int|string $id = 0): static
     {
         if (!isset($this->schema[$this->primaryKey])) {
             throw new RuntimeException("The primary key {$this->primaryKey} is not defined in the table schema");
