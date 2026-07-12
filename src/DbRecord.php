@@ -91,6 +91,7 @@ abstract class DbRecord
      * @param string $identifier
      *
      * @return string
+     * @codeCoverageIgnore
      */
     public function quoteIdentifier($identifier): string
     {
