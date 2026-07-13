@@ -298,6 +298,27 @@ class DbRecordTest extends TestCase
         $this->assertFalse($contact->delete());
     }
 
+    public function testDeleteWithStringPrimaryKey(): void
+    {
+        $db = self::getPDO();
+        $st = $db->prepare('INSERT INTO contact (firstname, lastname) VALUES (:firstname, :lastname)');
+        $st->bindValue(':firstname', 'pk_delete', PDO::PARAM_STR);
+        $st->bindValue(':lastname', 'ToDelete', PDO::PARAM_STR);
+        $st->execute();
+
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->load('pk_delete');
+        $this->assertSame('ToDelete', $contact->lastname);
+
+        $this->assertTrue($contact->delete());
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Error while trying to load item pk_delete');
+
+        $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
+        $reloaded->load('pk_delete');
+    }
+
     #[DataProvider('contactProvider')]
     public function testModelValidation($className): void
     {

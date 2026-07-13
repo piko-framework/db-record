@@ -462,7 +462,7 @@ abstract class DbRecord
             ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?'
         );
         $id = $this->{$this->primaryKey};
-        $st->bindParam(1, $id, PDO::PARAM_INT);
+        $st->bindParam(1, $id, $this->schema[$this->primaryKey]);
         $st->execute();
         $this->afterDelete();
 
