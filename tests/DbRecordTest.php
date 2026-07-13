@@ -8,6 +8,7 @@ use Piko\Tests\Models\Contact;
 use Piko\Tests\Models\Contact2;
 use Piko\Tests\Models\ContactLegacy;
 use Piko\Tests\Models\ContactMapped;
+use Piko\Tests\Models\ContactMappedProtected;
 use Piko\Tests\Models\ContactStringPk;
 use Piko\Tests\Infrastructure\TestContext;
 use PHPUnit\Framework\TestCase;
@@ -269,6 +270,34 @@ class DbRecordTest extends TestCase
         $this->assertSame('Column', $reloaded->firstName);
         $this->assertSame('Assignment', $reloaded->lastName);
         $this->assertTrue($reloaded->isActive);
+    }
+
+    public function testMappedProtectedPropertyNameCanResolveToColumnName(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactMappedProtected::class);
+
+        $contact->firstName = 'ResolvedByPropertyMap';
+
+        $this->assertSame('ResolvedByPropertyMap', $contact->firstName);
+    }
+
+    public function testMappedProtectedGetterFallsBackToMappedPropertyWhenDataIsMissing(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactMappedProtected::class);
+
+        $contact->setFirstNameDirect('ValueFromPropertyFallback');
+        $contact->clearFirstNameFromData();
+
+        $this->assertSame('ValueFromPropertyFallback', $contact->firstName);
+    }
+
+    public function testMappedProtectedNullColumnAssignmentAlsoNullsMappedProperty(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactMappedProtected::class);
+
+        $contact->firstname = null;
+
+        $this->assertNull($contact->firstName);
     }
 
     public function testUpdateWithStringPrimaryKey(): void
