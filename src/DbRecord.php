@@ -40,44 +40,40 @@ abstract class DbRecord
     public const TYPE_BOOL = PDO::PARAM_BOOL;
 
     /**
-     * The database instance.
-     *
-     * @var PDO
+     * Database connection.
      */
     protected PDO $db;
 
     /**
-     * The name of the table.
-     *
-     * @var string
+     * Database table name.
      */
     protected string $tableName = '';
 
     /**
-     * A name-value pair that describes the structure of the table.
-     * eg.`['id' => self::TYPE_INT, 'name' => 'id' => self::TYPE_STRING]`
+     * Table schema as `column => PDO::PARAM_*`.
      *
-     * @var int[]
+     * @var array<string, int>
      */
     protected array $schema = [];
 
     /**
-     * The name of the primary key. Default to 'id'.
-     *
-     * @var string
+     * Primary key column name.
      */
     protected string $primaryKey = 'id';
 
     /**
-     * @var array<string, string|int|bool> Represents the rows's data.
+     * Row data storage.
+     *
+     * @var array<string, string|int|bool>
      */
     protected array $data = [];
 
     /**
-     * Constructor
+     * Create a new record instance.
      *
-     * @param PDO $db A PDO instance
+     * @param PDO $db Database connection.
      *
+     * @throws RuntimeException When table name, schema, or primary key is invalid.
      */
     public function __construct(PDO $db)
     {
@@ -104,11 +100,12 @@ abstract class DbRecord
     }
 
     /**
-     * Quote table or column name
+     * Quote a table or column identifier according to the current PDO driver.
      *
-     * @param string $identifier
+     * @param string $identifier Raw table or column name.
      *
-     * @return string
+     * @return string Quoted identifier.
+     *
      * @codeCoverageIgnore
      */
     public function quoteIdentifier($identifier): string
@@ -124,14 +121,9 @@ abstract class DbRecord
     }
 
     /**
-     * Retrieve the attributes representing the record in the database.
+     * Return record attributes for all schema fields.
      *
-     * This method returns an associative array where each key corresponds to a column name
-     * as defined in the schema, and each value is the respective column's value from the
-     * current instance's data. This can be particularly useful for debugging or when you need
-     * to serialize the record for storage or transmission.
-     *
-     * @return array<string, mixed> An associative array where keys are column names and values are column values.
+     * @return array<string, mixed> Associative array of `column => value`.
      */
     protected function getAttributes(): array
     {
@@ -147,11 +139,12 @@ abstract class DbRecord
     }
 
     /**
-     * Check if column name is defined in the table schema.
+     * Ensure a column exists in the schema.
      *
-     * @param string $name
-     * @return void
-     * @throws RuntimeException
+     * @param string $name Column name.
+     *
+     * @throws RuntimeException When the column is not part of the schema.
+     *
      * @see DbRecord::$schema
      */
     protected function checkColumn(string $name): void
@@ -162,14 +155,10 @@ abstract class DbRecord
     }
 
     /**
-     * Initialize the schema for the database table.
+     * Initialize table metadata from `#[Table]` and `#[Column]` attributes.
      *
-     * This method uses reflection to inspect the current class for properties that have the `FieldAttribute` attribute.
-     * It then builds the schema array, which describes the structure of the table, using these properties.
-     * Additionally, it sets the table name if a `TableAttribute` is present on the class and identifies
-     * the primary key based on field attributes.
-     *
-     * @return void
+     * If attributes are present, this method resolves table name, schema types,
+     * and primary key definition through reflection.
      */
     protected function initializeSchema(): void
     {
@@ -201,6 +190,15 @@ abstract class DbRecord
         }
     }
 
+    /**
+     * Map a PHP property type to a PDO parameter type.
+     *
+     * @param string $type PHP type name.
+     *
+     * @return int One of the `PDO::PARAM_*` constants.
+     *
+     * @throws InvalidArgumentException When the type is not supported.
+     */
     private function getSchemaType(string $type): int
     {
         return match ($type) {
@@ -213,10 +211,11 @@ abstract class DbRecord
     }
 
     /**
-     * Magic method to access rows's data as class attribute.
+     * Magic getter for schema-defined attributes.
      *
-     * @param string $attribute The attribute's name.
-     * @return mixed The attribute's value.
+     * @param string $attribute Attribute name.
+     *
+     * @return mixed Attribute value.
      */
     public function __get(string $attribute)
     {
@@ -226,12 +225,15 @@ abstract class DbRecord
     }
 
     /**
-     * Magic method to set row's data as class attribute.
+     * Magic setter for schema-defined attributes.
      *
-     * @param string $attribute The attribute's name.
-     * @param string|int|bool $value The attribute's value.
+     * Values are cast according to schema PDO types.
      *
-     * @return void
+     * @param string $attribute Attribute name.
+     * @param string|int|bool $value Attribute value.
+     *
+     * @throws RuntimeException When the attribute is not in the schema.
+     * @throws InvalidArgumentException When schema type is unsupported.
      */
     public function __set(string $attribute, $value): void
     {
@@ -262,9 +264,9 @@ abstract class DbRecord
     }
 
     /**
-     * Magic method to check if attribute is defined in the table schema.
+     * Magic isset for schema-defined attributes.
      *
-     * @param string $attribute The attribute's name.
+     * @param string $attribute Attribute name.
      */
     public function __isset(string $attribute): bool
     {
@@ -272,11 +274,13 @@ abstract class DbRecord
     }
 
     /**
-     * Load row data.
+     * Load a row by primary key into the current instance.
      *
-     * @param int|string $id The value of the row primary key.
+     * @param int|string $id Primary key value.
+     *
      * @return static
-     * @throws RuntimeException
+     *
+     * @throws RuntimeException When no row matches the given primary key.
      */
     public function load(int|string $id = 0): static
     {
@@ -303,10 +307,11 @@ abstract class DbRecord
     }
 
     /**
-     * Method called before a save action.
+     * Hook called before save.
      *
-     * @param boolean $insert If the row is a new record, the value will be true, otherwise, false.
-     * @return boolean
+     * @param bool $insert Whether the operation is an INSERT (`true`) or UPDATE (`false`).
+     *
+     * @return bool Whether save may continue.
      */
     protected function beforeSave(bool $insert): bool
     {
@@ -317,9 +322,9 @@ abstract class DbRecord
     }
 
     /**
-     * Method called before a delete action.
+     * Hook called before delete.
      *
-     * @return boolean
+     * @return bool Whether delete may continue.
      */
     protected function beforeDelete(): bool
     {
@@ -330,9 +335,7 @@ abstract class DbRecord
     }
 
     /**
-     * Method called after a save action.
-     *
-     * @return void
+     * Hook called after save.
      */
     protected function afterSave(): void
     {
@@ -340,9 +343,7 @@ abstract class DbRecord
     }
 
     /**
-     * Method called after a delete action.
-     *
-     * @return void
+     * Hook called after delete.
      */
     protected function afterDelete(): void
     {
@@ -350,10 +351,11 @@ abstract class DbRecord
     }
 
     /**
-     * Save this record into the table.
+     * Persist the current record.
      *
-     * @throws RuntimeException
-     * @return boolean
+     * Inserts when the primary key is empty, otherwise updates the row.
+     *
+     * @return bool `true` on success, `false` when blocked by `beforeSave()`.
      */
     public function save(): bool
     {
@@ -415,10 +417,11 @@ abstract class DbRecord
     }
 
     /**
-     * Delete this record.
+     * Delete the current record.
      *
-     * @throws RuntimeException
-     * @return boolean
+     * @return bool `true` on success, `false` when blocked by `beforeDelete()`.
+     *
+     * @throws RuntimeException When the record is not loaded.
      */
     public function delete(): bool
     {
