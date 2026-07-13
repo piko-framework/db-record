@@ -405,4 +405,33 @@ class DbRecordTest extends TestCase
         $this->assertFalse($model->active);
         $this->assertTrue($model->active2);
     }
+
+    #[DataProvider('contactProvider')]
+    public function testSaveAndLoadNullValues($className): void
+    {
+        $contact = $this->createContact($className);
+
+        $contact->name = null;
+        $contact->age = null;
+        $contact->active = null;
+
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get($className);
+        $reloaded->load(1);
+
+        $this->assertNull($reloaded->name);
+        $this->assertNull($reloaded->age);
+        $this->assertNull($reloaded->active);
+
+        $st = self::getPDO()->prepare('SELECT name, age, active FROM contact WHERE id = :id');
+        $st->bindValue(':id', 1, PDO::PARAM_INT);
+        $st->execute();
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        $this->assertNotFalse($row);
+        $this->assertNull($row['name']);
+        $this->assertNull($row['age']);
+        $this->assertNull($row['active']);
+    }
 }

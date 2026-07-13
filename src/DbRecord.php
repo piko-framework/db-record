@@ -64,7 +64,7 @@ abstract class DbRecord
     /**
      * Row data storage.
      *
-     * @var array<string, string|int|bool>
+     * @var array<string, string|int|bool|null>
      */
     protected array $data = [];
 
@@ -235,6 +235,23 @@ abstract class DbRecord
     }
 
     /**
+     * Resolve the PDO parameter type for a value.
+     *
+     * @param int $schemaType One of the `PDO::PARAM_*` constants.
+     * @param mixed $value Value to bind.
+     *
+     * @return int One of the `PDO::PARAM_*` constants.
+     */
+    private function getParameterType(int $schemaType, mixed $value): int
+    {
+        if ($value === null) {
+            return PDO::PARAM_NULL;
+        }
+
+        return $schemaType;
+    }
+
+    /**
      * Magic getter for schema-defined attributes.
      *
      * @param string $attribute Attribute name.
@@ -254,7 +271,7 @@ abstract class DbRecord
      * Values are cast according to schema PDO types.
      *
      * @param string $attribute Attribute name.
-     * @param string|int|bool $value Attribute value.
+     * @param string|int|bool|null $value Attribute value.
      *
      * @throws RuntimeException When the attribute is not in the schema.
      * @throws InvalidArgumentException When schema type is unsupported.
@@ -262,6 +279,12 @@ abstract class DbRecord
     public function __set(string $attribute, $value): void
     {
         $this->checkColumn($attribute);
+
+        if ($value === null) {
+            $this->data[$attribute] = null;
+
+            return;
+        }
 
         $schemaType = $this->schema[$attribute];
 
@@ -422,11 +445,17 @@ abstract class DbRecord
         $st = $this->db->prepare($query);
 
         foreach ($fields as $field) {
-            $st->bindValue(':' . $field, $this->$field, $this->schema[$field]);
+            $value = $this->$field;
+            $st->bindValue(':' . $field, $value, $this->getParameterType($this->schema[$field], $value));
         }
 
         if (!$insert) {
-            $st->bindValue(':__pk', $this->{$this->primaryKey}, $this->schema[$this->primaryKey]);
+            $primaryKeyValue = $this->{$this->primaryKey};
+            $st->bindValue(
+                ':__pk',
+                $primaryKeyValue,
+                $this->getParameterType($this->schema[$this->primaryKey], $primaryKeyValue)
+            );
         }
 
         $st->execute();
