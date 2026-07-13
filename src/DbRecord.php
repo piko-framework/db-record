@@ -460,8 +460,12 @@ abstract class DbRecord
 
         $st->execute();
 
-        if ($insert) {
-            $this->{$this->primaryKey} = (int) $this->db->lastInsertId();
+        if ($insert && $this->schema[$this->primaryKey] === self::TYPE_INT && $this->{$this->primaryKey} === null) {
+            $lastInsertId = $this->db->lastInsertId();
+
+            if ($lastInsertId !== false && $lastInsertId !== '') {
+                $this->{$this->primaryKey} = (int) $lastInsertId;
+            }
         }
 
         $this->afterSave();

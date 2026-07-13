@@ -242,6 +242,15 @@ class DbRecordTest extends TestCase
         $this->assertSame('After', $reloaded->lastname);
     }
 
+    public function testInsertWithStringPrimaryKeyDoesNotUseLastInsertId(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->lastname = 'InsertedWithoutPk';
+
+        $this->assertTrue($contact->save());
+        $this->assertNull($contact->firstname);
+    }
+
     public function testUpdateWithStringZeroPrimaryKey(): void
     {
         $db = self::getPDO();
