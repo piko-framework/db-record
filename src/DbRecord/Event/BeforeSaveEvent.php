@@ -23,18 +23,14 @@ class BeforeSaveEvent extends AlterEvent
 {
     /**
      * Indicates if the event is valid for further validation.
-     *
-     * @var boolean
      */
-    public $isValid = true;
+    public bool $isValid = true;
 
     /**
      * Flag to see if db save operation is INSERT.
      * If false, indicates that is an UPDATE operation.
-     *
-     * @var boolean
      */
-    public $insert = false;
+    public bool $insert = false;
 
     /**
      * @param bool $insert Indicates if the operation is INSERT

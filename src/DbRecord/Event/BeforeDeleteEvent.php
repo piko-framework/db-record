@@ -21,8 +21,6 @@ class BeforeDeleteEvent extends AlterEvent
 {
     /**
      * Indicates if the event is valid for further validation.
-     *
-     * @var boolean
      */
-    public $isValid = true;
+    public bool $isValid = true;
 }
