@@ -29,6 +29,14 @@ use Piko\DbRecord\Event\BeforeDeleteEvent;
  * the Active Record pattern.
  *
  * @author Sylvain PHILIP <contact@sphilip.com>
+ *
+ * @phpstan-type Metadata array{
+ *     tableName: string,
+ *     schema: array<string, int>,
+ *     primaryKey: string,
+ *     columnToProperty: array<string, string>,
+ *     propertyToColumn: array<string, string>
+ * }
  */
 abstract class DbRecord
 {
@@ -85,7 +93,7 @@ abstract class DbRecord
     /**
      * Metadata cache indexed by model FQCN.
      *
-     * @var array<class-string, array{tableName:string, schema:array<string, int>, primaryKey:string, columnToProperty:array<string, string>, propertyToColumn:array<string, string>}>
+     * @var array<class-string, Metadata>
      */
     private static array $metadataCache = [];
 
@@ -550,7 +558,11 @@ abstract class DbRecord
 
         $st->execute();
 
-        if ($insert && $this->schema[$this->primaryKey] === self::TYPE_INT && $this->getColumnValue($this->primaryKey) === null) {
+        if (
+            $insert &&
+            $this->schema[$this->primaryKey] === self::TYPE_INT &&
+            $this->getColumnValue($this->primaryKey) === null
+        ) {
             $lastInsertId = $this->db->lastInsertId();
 
             if ($lastInsertId !== false && $lastInsertId !== '') {
