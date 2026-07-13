@@ -105,6 +105,7 @@ Create a PDO instance and initialize schema:
 
 ```php
 $db = new PDO('sqlite::memory:');
+$db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
 $query = <<<SQL
 CREATE TABLE contact (
@@ -117,6 +118,9 @@ SQL;
 
 $db->exec($query);
 ```
+
+> Recommended: always enable `PDO::ATTR_ERRMODE = PDO::ERRMODE_EXCEPTION`.
+> DbRecord now throws explicit `RuntimeException` when `prepare()` or `execute()` fails, but exception mode still gives the clearest SQL diagnostics.
 
 ### Perform CRUD operations
 
@@ -154,6 +158,13 @@ $contact->save();
 ```php
 $contact->delete();
 ```
+
+## Known limitations
+
+- Composite primary keys are not supported.
+- `save()` updates all mapped columns (no dirty-field tracking yet).
+- For auto-increment integer primary keys, inserted IDs are filled from `PDO::lastInsertId()` when available.
+- For non-integer (e.g. string) primary keys, your application must provide the key value when needed.
 
 ## Running tests
 
