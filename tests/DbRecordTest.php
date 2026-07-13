@@ -153,6 +153,24 @@ class DbRecordTest extends TestCase
         new Contact(new \DateTime());
     }
 
+    public function testWithMissingTableName(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage("The table name is not defined.");
+
+        new class(self::getPDO()) extends \Piko\DbRecord {};
+    }
+
+    public function testWithMissingSchema(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage("No table schema defined.");
+
+        new class(self::getPDO()) extends \Piko\DbRecord {
+            protected $tableName = 'contact';
+        };
+    }
+
     #[DataProvider('contactProvider')]
     public function testCreate($className): void
     {
@@ -164,10 +182,9 @@ class DbRecordTest extends TestCase
 
     public function testLoadWithWrongPrimaryKey(): void
     {
-        $contact = TestContext::getContainer()?->get(Contact2::class);
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/primary key contact_id is not defined/');
-        $contact->load(1);
+        $contact = TestContext::getContainer()?->get(Contact2::class);
     }
 
     #[DataProvider('contactProvider')]

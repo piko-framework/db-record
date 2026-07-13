@@ -83,6 +83,24 @@ abstract class DbRecord
     {
         $this->db = $db;
         $this->initializeSchema();
+
+        if (empty($this->tableName)) {
+            throw new RuntimeException(
+                "The table name is not defined." .
+                " Ensure the class has a '@Table' attribute with a 'name' property."
+            );
+        }
+
+        if (empty($this->schema)) {
+            throw new RuntimeException(
+                "No table schema defined." .
+                " Ensure the class has properties annotated with '@Column' attributes."
+            );
+        }
+
+        if (!isset($this->schema[$this->primaryKey])) {
+            throw new RuntimeException("The primary key {$this->primaryKey} is not defined in the table schema");
+        }
     }
 
     /**
@@ -263,10 +281,6 @@ abstract class DbRecord
      */
     public function load(int|string $id = 0): static
     {
-        if (!isset($this->schema[$this->primaryKey])) {
-            throw new RuntimeException("The primary key {$this->primaryKey} is not defined in the table schema");
-        }
-
         $cols = array_keys($this->schema);
 
         foreach ($cols as &$col) {
