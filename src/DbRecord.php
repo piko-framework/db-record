@@ -390,13 +390,17 @@ abstract class DbRecord
             }
 
             $query = 'UPDATE ' . $this->quoteIdentifier($this->tableName) . ' SET ' . implode(', ', $valueKeys);
-            $query .= ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ' . (int) $this->{$this->primaryKey};
+            $query .= ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = :__pk';
         }
 
         $st = $this->db->prepare($query);
 
         foreach ($fields as $field) {
             $st->bindValue(':' . $field, $this->$field, $this->schema[$field]);
+        }
+
+        if (!$insert) {
+            $st->bindValue(':__pk', (int) $this->{$this->primaryKey}, $this->schema[$this->primaryKey]);
         }
 
         $st->execute();
