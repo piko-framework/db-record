@@ -7,6 +7,7 @@ use TypeError;
 use Piko\Tests\Models\Contact;
 use Piko\Tests\Models\Contact2;
 use Piko\Tests\Models\ContactLegacy;
+use Piko\Tests\Models\ContactMapped;
 use Piko\Tests\Models\ContactStringPk;
 use Piko\Tests\Infrastructure\TestContext;
 use PHPUnit\Framework\TestCase;
@@ -219,6 +220,55 @@ class DbRecordTest extends TestCase
         $contact = TestContext::getContainer()?->get($className);
         $contact->load(1);
         $this->assertEquals('Sylvain updated', $contact->firstname);
+    }
+
+    public function testMappedColumnsCrud(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactMapped::class);
+        $contact->firstName = 'Mapped';
+        $contact->lastName = 'Record';
+        $contact->isActive = true;
+
+        $this->assertTrue($contact->save());
+        $this->assertSame(1, $contact->contactId);
+
+        $reloaded = TestContext::getContainer()?->get(ContactMapped::class);
+        $reloaded->load(1);
+
+        $this->assertSame('Mapped', $reloaded->firstName);
+        $this->assertSame('Record', $reloaded->lastName);
+        $this->assertTrue($reloaded->isActive);
+
+        $reloaded->lastName = 'Updated';
+        $this->assertTrue($reloaded->save());
+
+        $updated = TestContext::getContainer()?->get(ContactMapped::class);
+        $updated->load(1);
+
+        $this->assertSame('Updated', $updated->lastName);
+        $this->assertTrue($updated->delete());
+    }
+
+    public function testMappedColumnsCanBeAssignedByColumnName(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactMapped::class);
+
+        $contact->firstname = 'Column';
+        $contact->lastname = 'Assignment';
+        $contact->active = true;
+
+        $this->assertSame('Column', $contact->firstName);
+        $this->assertSame('Assignment', $contact->lastName);
+        $this->assertTrue($contact->isActive);
+
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactMapped::class);
+        $reloaded->load(1);
+
+        $this->assertSame('Column', $reloaded->firstName);
+        $this->assertSame('Assignment', $reloaded->lastName);
+        $this->assertTrue($reloaded->isActive);
     }
 
     public function testUpdateWithStringPrimaryKey(): void

@@ -69,9 +69,23 @@ abstract class DbRecord
     protected array $data = [];
 
     /**
+     * Map DB column names to model property names.
+     *
+     * @var array<string, string>
+     */
+    protected array $columnToProperty = [];
+
+    /**
+     * Map model property names to DB column names.
+     *
+     * @var array<string, string>
+     */
+    protected array $propertyToColumn = [];
+
+    /**
      * Metadata cache indexed by model FQCN.
      *
-     * @var array<class-string, array{tableName:string, schema:array<string, int>, primaryKey:string}>
+     * @var array<class-string, array{tableName:string, schema:array<string, int>, primaryKey:string, columnToProperty:array<string, string>, propertyToColumn:array<string, string>}>
      */
     private static array $metadataCache = [];
 
@@ -139,26 +153,58 @@ abstract class DbRecord
         $attributes = [];
 
         foreach ($fields as $field) {
-            $attributes[$field] = $this->$field;
+            $attributes[$field] = $this->getColumnValue($field);
         }
 
         return $attributes;
     }
 
     /**
-     * Ensure a column exists in the schema.
+     * Resolve an attribute name to a schema column.
      *
-     * @param string $name Column name.
+     * @param string $name Column or property name.
      *
-     * @throws RuntimeException When the column is not part of the schema.
+     * @return string Schema column name.
      *
-     * @see DbRecord::$schema
+     * @throws RuntimeException When the name cannot be resolved to a schema column.
      */
-    protected function checkColumn(string $name): void
+    protected function resolveColumnName(string $name): string
     {
-        if (!isset($this->schema[$name])) {
-            throw new RuntimeException("$name is not in the table schema.");
+        if (isset($this->schema[$name])) {
+            return $name;
         }
+
+        if (isset($this->propertyToColumn[$name])) {
+            return $this->propertyToColumn[$name];
+        }
+
+        throw new RuntimeException("$name is not in the table schema.");
+    }
+
+    /**
+     * Resolve a schema column to its mapped property name.
+     */
+    protected function getPropertyName(string $column): string
+    {
+        return $this->columnToProperty[$column] ?? $column;
+    }
+
+    /**
+     * Read a value by schema column name.
+     *
+     * @param string $column Schema column name.
+     *
+     * @return mixed
+     */
+    protected function getColumnValue(string $column)
+    {
+        $propertyName = $this->getPropertyName($column);
+
+        if ($propertyName !== $column && property_exists($this, $propertyName)) {
+            return $this->{$propertyName};
+        }
+
+        return $this->{$column};
     }
 
     /**
@@ -176,6 +222,8 @@ abstract class DbRecord
             $this->tableName = $metadata['tableName'];
             $this->schema = $metadata['schema'];
             $this->primaryKey = $metadata['primaryKey'];
+            $this->columnToProperty = $metadata['columnToProperty'];
+            $this->propertyToColumn = $metadata['propertyToColumn'];
 
             return;
         }
@@ -194,12 +242,15 @@ abstract class DbRecord
 
             if ($fieldAttribute) {
                 $fieldInstance = $fieldAttribute->newInstance();
-                $fieldName = $fieldInstance->name ?? $property->getName();
+                $propertyName = $property->getName();
+                $fieldName = $fieldInstance->name ?? $propertyName;
                 $propertyType = $property->getType();
                 // Default type to string if no type is declared
                 $type = $propertyType instanceof ReflectionNamedType ? $propertyType->getName() : 'string';
 
                 $this->schema[$fieldName] = $this->getSchemaType($type);
+                $this->columnToProperty[$fieldName] = $propertyName;
+                $this->propertyToColumn[$propertyName] = $fieldName;
 
                 if ($fieldInstance->primaryKey) {
                     $this->primaryKey = $fieldName;
@@ -207,10 +258,18 @@ abstract class DbRecord
             }
         }
 
+        foreach (array_keys($this->schema) as $columnName) {
+            $propertyName = $this->columnToProperty[$columnName] ?? $columnName;
+            $this->columnToProperty[$columnName] = $propertyName;
+            $this->propertyToColumn[$propertyName] = $columnName;
+        }
+
         self::$metadataCache[$className] = [
             'tableName' => $this->tableName,
             'schema' => $this->schema,
             'primaryKey' => $this->primaryKey,
+            'columnToProperty' => $this->columnToProperty,
+            'propertyToColumn' => $this->propertyToColumn,
         ];
     }
 
@@ -260,9 +319,19 @@ abstract class DbRecord
      */
     public function __get(string $attribute)
     {
-        $this->checkColumn($attribute);
+        $column = $this->resolveColumnName($attribute);
 
-        return $this->data[$attribute] ?? null;
+        if (array_key_exists($column, $this->data)) {
+            return $this->data[$column];
+        }
+
+        $propertyName = $this->getPropertyName($column);
+
+        if ($propertyName !== $column && property_exists($this, $propertyName)) {
+            return $this->{$propertyName};
+        }
+
+        return null;
     }
 
     /**
@@ -278,15 +347,21 @@ abstract class DbRecord
      */
     public function __set(string $attribute, $value): void
     {
-        $this->checkColumn($attribute);
+        $column = $this->resolveColumnName($attribute);
 
         if ($value === null) {
-            $this->data[$attribute] = null;
+            $this->data[$column] = null;
+
+            $propertyName = $this->getPropertyName($column);
+
+            if ($propertyName !== $column && property_exists($this, $propertyName)) {
+                $this->{$propertyName} = null;
+            }
 
             return;
         }
 
-        $schemaType = $this->schema[$attribute];
+        $schemaType = $this->schema[$column];
 
         $castBooleanValue = function ($value): bool {
             if (is_bool($value)) {
@@ -302,12 +377,20 @@ abstract class DbRecord
             return (bool) $value;
         };
 
-        $this->data[$attribute] = match ($schemaType) {
+        $castValue = match ($schemaType) {
             self::TYPE_INT => (int) $value,
             self::TYPE_BOOL => $castBooleanValue($value),
             self::TYPE_STRING => (string) $value,
             default => throw new InvalidArgumentException("Unsupported type: $schemaType") // @codeCoverageIgnore
         };
+
+        $this->data[$column] = $castValue;
+
+        $propertyName = $this->getPropertyName($column);
+
+        if ($propertyName !== $column && property_exists($this, $propertyName)) {
+            $this->{$propertyName} = $castValue;
+        }
     }
 
     /**
@@ -317,7 +400,7 @@ abstract class DbRecord
      */
     public function __isset(string $attribute): bool
     {
-        return isset($this->schema[$attribute]);
+        return isset($this->schema[$attribute]) || isset($this->propertyToColumn[$attribute]);
     }
 
     /**
@@ -331,13 +414,20 @@ abstract class DbRecord
      */
     public function load(int|string $id = 0): static
     {
-        $cols = array_keys($this->schema);
+        $cols = [];
 
-        foreach ($cols as &$col) {
-            $col = $this->quoteIdentifier($col);
+        foreach (array_keys($this->schema) as $columnName) {
+            $quotedColumnName = $this->quoteIdentifier($columnName);
+            $propertyName = $this->getPropertyName($columnName);
+
+            if ($propertyName !== $columnName) {
+                $cols[] = $quotedColumnName . ' AS ' . $this->quoteIdentifier($propertyName);
+            } else {
+                $cols[] = $quotedColumnName;
+            }
         }
 
-        $query = 'SELECT ' . implode(',', $cols) . ' FROM '
+        $query = 'SELECT ' . implode(', ', $cols) . ' FROM '
                . $this->quoteIdentifier($this->tableName)
                . ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?';
 
@@ -406,7 +496,7 @@ abstract class DbRecord
      */
     public function save(): bool
     {
-        $insert = $this->{$this->primaryKey} === null;
+        $insert = $this->getColumnValue($this->primaryKey) === null;
 
         if (!$this->beforeSave($insert)) {
             return false;
@@ -445,12 +535,12 @@ abstract class DbRecord
         $st = $this->db->prepare($query);
 
         foreach ($fields as $field) {
-            $value = $this->$field;
+            $value = $this->getColumnValue($field);
             $st->bindValue(':' . $field, $value, $this->getParameterType($this->schema[$field], $value));
         }
 
         if (!$insert) {
-            $primaryKeyValue = $this->{$this->primaryKey};
+            $primaryKeyValue = $this->getColumnValue($this->primaryKey);
             $st->bindValue(
                 ':__pk',
                 $primaryKeyValue,
@@ -460,11 +550,12 @@ abstract class DbRecord
 
         $st->execute();
 
-        if ($insert && $this->schema[$this->primaryKey] === self::TYPE_INT && $this->{$this->primaryKey} === null) {
+        if ($insert && $this->schema[$this->primaryKey] === self::TYPE_INT && $this->getColumnValue($this->primaryKey) === null) {
             $lastInsertId = $this->db->lastInsertId();
 
             if ($lastInsertId !== false && $lastInsertId !== '') {
-                $this->{$this->primaryKey} = (int) $lastInsertId;
+                $primaryKeyProperty = $this->getPropertyName($this->primaryKey);
+                $this->{$primaryKeyProperty} = (int) $lastInsertId;
             }
         }
 
@@ -482,7 +573,9 @@ abstract class DbRecord
      */
     public function delete(): bool
     {
-        if ($this->{$this->primaryKey} === null) {
+        $id = $this->getColumnValue($this->primaryKey);
+
+        if ($id === null) {
             throw new RuntimeException("Item cannot be deleted because it is not loaded.");
         }
 
@@ -494,8 +587,7 @@ abstract class DbRecord
             'DELETE FROM ' . $this->quoteIdentifier($this->tableName) .
             ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?'
         );
-        $id = $this->{$this->primaryKey};
-        $st->bindParam(1, $id, $this->schema[$this->primaryKey]);
+        $st->bindValue(1, $id, $this->schema[$this->primaryKey]);
         $st->execute();
         $this->afterDelete();
 
