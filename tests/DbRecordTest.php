@@ -7,6 +7,7 @@ use TypeError;
 use Piko\Tests\Models\Contact;
 use Piko\Tests\Models\Contact2;
 use Piko\Tests\Models\ContactLegacy;
+use Piko\Tests\Models\ContactStringPk;
 use Piko\Tests\Infrastructure\TestContext;
 use PHPUnit\Framework\TestCase;
 use Piko\DbRecord\Event\BeforeSaveEvent;
@@ -167,7 +168,7 @@ class DbRecordTest extends TestCase
         $this->expectExceptionMessage("No table schema defined.");
 
         new class(self::getPDO()) extends \Piko\DbRecord {
-            protected $tableName = 'contact';
+            protected string $tableName = 'contact';
         };
     }
 
@@ -218,6 +219,27 @@ class DbRecordTest extends TestCase
         $contact = TestContext::getContainer()?->get($className);
         $contact->load(1);
         $this->assertEquals('Sylvain updated', $contact->firstname);
+    }
+
+    public function testUpdateWithStringPrimaryKey(): void
+    {
+        $db = self::getPDO();
+        $st = $db->prepare('INSERT INTO contact (firstname, lastname) VALUES (:firstname, :lastname)');
+        $st->bindValue(':firstname', 'pk_string', PDO::PARAM_STR);
+        $st->bindValue(':lastname', 'Before', PDO::PARAM_STR);
+        $st->execute();
+
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->load('pk_string');
+        $this->assertSame('Before', $contact->lastname);
+
+        $contact->lastname = 'After';
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
+        $reloaded->load('pk_string');
+
+        $this->assertSame('After', $reloaded->lastname);
     }
 
     #[DataProvider('contactProvider')]

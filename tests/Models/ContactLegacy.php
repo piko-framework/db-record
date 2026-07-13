@@ -3,9 +3,9 @@ namespace Piko\Tests\Models;
 
 class ContactLegacy extends \Piko\DbRecord
 {
-    protected $tableName = 'contact';
+    protected string $tableName = 'contact';
 
-    protected $schema = [
+    protected array $schema = [
         'id'        => self::TYPE_INT,
         'name'      => self::TYPE_STRING,
         'firstname' => self::TYPE_STRING,

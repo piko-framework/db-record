@@ -1,16 +1,13 @@
 <?php
 namespace Piko\Tests\Models;
 
-class Contact2 extends \Piko\DbRecord
+class ContactStringPk extends \Piko\DbRecord
 {
     protected string $tableName = 'contact';
-    protected string $primaryKey = 'contact_id';
+    protected string $primaryKey = 'firstname';
 
     protected array $schema = [
-        'id'        => self::TYPE_INT,
-        'name'      => self::TYPE_STRING,
         'firstname' => self::TYPE_STRING,
         'lastname'  => self::TYPE_STRING,
-        'order'     =>  self::TYPE_INT
     ];
 }

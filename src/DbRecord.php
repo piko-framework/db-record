@@ -51,7 +51,7 @@ abstract class DbRecord
      *
      * @var string
      */
-    protected $tableName = '';
+    protected string $tableName = '';
 
     /**
      * A name-value pair that describes the structure of the table.
@@ -59,19 +59,19 @@ abstract class DbRecord
      *
      * @var int[]
      */
-    protected $schema = [];
+    protected array $schema = [];
 
     /**
      * The name of the primary key. Default to 'id'.
      *
      * @var string
      */
-    protected $primaryKey = 'id';
+    protected string $primaryKey = 'id';
 
     /**
      * @var array<string, string|int|bool> Represents the rows's data.
      */
-    protected $data = [];
+    protected array $data = [];
 
     /**
      * Constructor
@@ -400,7 +400,7 @@ abstract class DbRecord
         }
 
         if (!$insert) {
-            $st->bindValue(':__pk', (int) $this->{$this->primaryKey}, $this->schema[$this->primaryKey]);
+            $st->bindValue(':__pk', $this->{$this->primaryKey}, $this->schema[$this->primaryKey]);
         }
 
         $st->execute();
