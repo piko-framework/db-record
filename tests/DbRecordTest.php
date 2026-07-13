@@ -49,10 +49,10 @@ class DbRecordTest extends TestCase
         CREATE TABLE contact (
             id INT IDENTITY(1,1) PRIMARY KEY,
             name NVARCHAR(255) NULL,
-            firstname NVARCHAR(255),
-            lastname NVARCHAR(255),
+            firstname NVARCHAR(255) NULL,
+            lastname NVARCHAR(255) NULL,
             age INT NULL,
-            [order] INT,
+            [order] INT NULL,
             active BIT DEFAULT 0 NULL,
             active2 BIT DEFAULT 1,
             income FLOAT DEFAULT 0
