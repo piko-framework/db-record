@@ -242,6 +242,27 @@ class DbRecordTest extends TestCase
         $this->assertSame('After', $reloaded->lastname);
     }
 
+    public function testUpdateWithStringZeroPrimaryKey(): void
+    {
+        $db = self::getPDO();
+        $st = $db->prepare('INSERT INTO contact (firstname, lastname) VALUES (:firstname, :lastname)');
+        $st->bindValue(':firstname', '0', PDO::PARAM_STR);
+        $st->bindValue(':lastname', 'BeforeZero', PDO::PARAM_STR);
+        $st->execute();
+
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->load('0');
+        $this->assertSame('BeforeZero', $contact->lastname);
+
+        $contact->lastname = 'AfterZero';
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
+        $reloaded->load('0');
+
+        $this->assertSame('AfterZero', $reloaded->lastname);
+    }
+
     #[DataProvider('contactProvider')]
     public function testBeforeSave($className): void
     {
@@ -317,6 +338,27 @@ class DbRecordTest extends TestCase
 
         $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
         $reloaded->load('pk_delete');
+    }
+
+    public function testDeleteWithStringZeroPrimaryKey(): void
+    {
+        $db = self::getPDO();
+        $st = $db->prepare('INSERT INTO contact (firstname, lastname) VALUES (:firstname, :lastname)');
+        $st->bindValue(':firstname', '0', PDO::PARAM_STR);
+        $st->bindValue(':lastname', 'DeleteZero', PDO::PARAM_STR);
+        $st->execute();
+
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->load('0');
+        $this->assertSame('DeleteZero', $contact->lastname);
+
+        $this->assertTrue($contact->delete());
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Error while trying to load item 0');
+
+        $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
+        $reloaded->load('0');
     }
 
     #[DataProvider('contactProvider')]

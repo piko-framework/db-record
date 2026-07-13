@@ -400,13 +400,13 @@ abstract class DbRecord
     /**
      * Persist the current record.
      *
-     * Inserts when the primary key is empty, otherwise updates the row.
+     * Inserts when the primary key is `null`, otherwise updates the row.
      *
      * @return bool `true` on success, `false` when blocked by `beforeSave()`.
      */
     public function save(): bool
     {
-        $insert = empty($this->{$this->primaryKey}) ? true : false;
+        $insert = $this->{$this->primaryKey} === null;
 
         if (!$this->beforeSave($insert)) {
             return false;
@@ -478,7 +478,7 @@ abstract class DbRecord
      */
     public function delete(): bool
     {
-        if (empty($this->{$this->primaryKey})) {
+        if ($this->{$this->primaryKey} === null) {
             throw new RuntimeException("Item cannot be deleted because it is not loaded.");
         }
 
