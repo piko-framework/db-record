@@ -5,7 +5,7 @@
 
 Piko Db Record is a lightweight Active Record implementation built on top of PDO.
 
-It has been tested and works with the following databases:
+It has been tested with:
 
 - SQLite
 - MySQL
@@ -14,7 +14,7 @@ It has been tested and works with the following databases:
 
 ## Installation
 
-It's recommended that you use Composer to install Piko Db Record.
+It is recommended to install Piko Db Record with Composer:
 
 ```bash
 composer require piko/db-record
@@ -26,57 +26,99 @@ https://piko-framework.github.io/docs/db-record.html
 
 ## Usage
 
-First, ensure you have the necessary autoloading in place:
+First, ensure autoloading is available:
 
 ```php
 require 'vendor/autoload.php';
 ```
 
-### Define Your Model
-
-Use the `Piko\DbRecord`, `Piko\DbRecord\Attribute\Table`, and `Piko\DbRecord\Attribute\Column`
-classes to define your model. For example:
+### Define your model (attributes)
 
 ```php
 use Piko\DbRecord;
 use Piko\DbRecord\Attribute\Table;
 use Piko\DbRecord\Attribute\Column;
 
-#[Table(name:'contact')]
+#[Table(name: 'contact')]
 class Contact extends DbRecord
 {
     #[Column(primaryKey: true)]
     public ?int $id = null;
 
     #[Column]
-    public $name = null;
+    public ?string $firstname = null;
 
     #[Column]
-    public ?int $order = null;
-}
+    public ?string $lastname = null;
 
+    #[Column]
+    public ?bool $active = false;
+}
 ```
 
-### Setup Database Connection
-
-Create a new PDO instance and set up your database schema:
+### Optional: map DB columns to different PHP property names
 
 ```php
-// See https://www.php.net/manual/en/class.pdo.php
+use Piko\DbRecord;
+use Piko\DbRecord\Attribute\Table;
+use Piko\DbRecord\Attribute\Column;
+
+#[Table(name: 'contact')]
+class ContactMapped extends DbRecord
+{
+    #[Column(name: 'id', primaryKey: true)]
+    public ?int $contactId = null;
+
+    #[Column(name: 'firstname')]
+    public ?string $firstName = null;
+
+    #[Column(name: 'lastname')]
+    public ?string $lastName = null;
+
+    #[Column(name: 'active')]
+    public ?bool $isActive = false;
+}
+```
+
+You can then use either mapped property names (`$contact->firstName`) or underlying column names (`$contact->firstname`).
+
+### Optional: legacy/manual schema (including string primary keys)
+
+```php
+use Piko\DbRecord;
+
+class ContactStringPk extends DbRecord
+{
+    protected string $tableName = 'contact';
+    protected string $primaryKey = 'firstname';
+
+    protected array $schema = [
+        'firstname' => self::TYPE_STRING,
+        'lastname'  => self::TYPE_STRING,
+    ];
+}
+```
+
+### Setup database connection
+
+Create a PDO instance and initialize schema:
+
+```php
 $db = new PDO('sqlite::memory:');
 
-$query = <<<EOL
+$query = <<<SQL
 CREATE TABLE contact (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  `order` INTEGER
+  firstname TEXT,
+  lastname TEXT,
+  active INTEGER DEFAULT 0
 )
-EOL;
+SQL;
 
 $db->exec($query);
 ```
 
-### Perform CRUD Operations
+### Perform CRUD operations
 
 #### Create
 
@@ -84,40 +126,52 @@ Create a new record and save it to the database:
 
 ```php
 $contact = new Contact($db);
-$contact->name = 'John';
-$contact->order = 1;
+$contact->firstname = 'John';
+$contact->lastname = 'Doe';
+$contact->active = true;
 $contact->save();
 
-echo "Contact id : {$contact->id}"; // Contact id : 1
+echo "Contact id: {$contact->id}"; // Contact id : 1
 ```
 
 #### Read
 
-Retrieve records from the database:
-
 ```php
-$st = $db->prepare('SELECT * FROM contact');
-$st->execute();
-$rows = $st->fetchAll(PDO::FETCH_CLASS, Contact::class, [$db]);
-
-print_r($rows); // Array ([0] => Contact Object(...))
-
-// Load a single record by primary key:
 $contact = (new Contact($db))->load(1);
 
-var_dump($contact->name); // John
+var_dump($contact->firstname); // John
+```
+
+#### Update
+
+```php
+$contact->lastname = 'Doe Jr.';
+$contact->save();
 ```
 
 #### Delete
 
-Delete a record from the database:
-
 ```php
-
 $contact->delete();
-print_r($st->fetchAll()); // Array()
+```
+
+## Running tests
+
+Run full checks (all database targets + coding standards + static analysis):
+
+```bash
+composer tests
+```
+
+Run tests for one database only:
+
+```bash
+composer phpunit:sqlite
+composer phpunit:mysql
+composer phpunit:pgsql
+composer phpunit:mssql
 ```
 
 ## Support
 
-If you encounter any issues or have questions, feel free to open an issue on GitHub.
+If you encounter issues or have questions, feel free to open an issue on GitHub.
