@@ -69,6 +69,13 @@ abstract class DbRecord
     protected array $data = [];
 
     /**
+     * Metadata cache indexed by model FQCN.
+     *
+     * @var array<class-string, array{tableName:string, schema:array<string, int>, primaryKey:string}>
+     */
+    private static array $metadataCache = [];
+
+    /**
      * Create a new record instance.
      *
      * @param PDO $db Database connection.
@@ -162,6 +169,17 @@ abstract class DbRecord
      */
     protected function initializeSchema(): void
     {
+        $className = static::class;
+
+        if (isset(self::$metadataCache[$className])) {
+            $metadata = self::$metadataCache[$className];
+            $this->tableName = $metadata['tableName'];
+            $this->schema = $metadata['schema'];
+            $this->primaryKey = $metadata['primaryKey'];
+
+            return;
+        }
+
         $reflectionClass = new ReflectionClass($this);
 
         $tableAttribute = $reflectionClass->getAttributes(Table::class)[0] ?? null;
@@ -188,6 +206,12 @@ abstract class DbRecord
                 }
             }
         }
+
+        self::$metadataCache[$className] = [
+            'tableName' => $this->tableName,
+            'schema' => $this->schema,
+            'primaryKey' => $this->primaryKey,
+        ];
     }
 
     /**
