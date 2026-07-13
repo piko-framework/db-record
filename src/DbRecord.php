@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Piko;
 
 use PDO;
+use PDOStatement;
 use ReflectionClass;
 use RuntimeException;
 use ReflectionNamedType;
@@ -142,11 +143,49 @@ abstract class DbRecord
         $driver = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         return match ($driver) {
-            'mysql', 'sqlite' => '`' . $identifier . '`',
-            'pgsql' => '"' . $identifier . '"',
-            'sqlsrv', 'dblib' => '[' . $identifier . ']',
+            'mysql', 'sqlite' => '`' . str_replace('`', '``', $identifier) . '`',
+            'pgsql' => '"' . str_replace('"', '""', $identifier) . '"',
+            'sqlsrv', 'dblib' => '[' . str_replace(']', ']]', $identifier) . ']',
             default => $identifier,
         };
+    }
+
+    /**
+     * Prepare a SQL statement or throw with context.
+     *
+     * @param string $query SQL query.
+     *
+     * @return PDOStatement
+     */
+    private function prepareOrFail(string $query): PDOStatement
+    {
+        $statement = $this->db->prepare($query);
+
+        if (!$statement instanceof PDOStatement) {
+            $error = $this->db->errorInfo();
+            $reason = $error[2] ?? 'unknown error';
+            throw new RuntimeException('Failed to prepare SQL statement: ' . $reason);
+        }
+
+        return $statement;
+    }
+
+    /**
+     * Execute a SQL statement or throw with context.
+     *
+     * @param PDOStatement $statement Prepared statement.
+     * @param string $context Action context for error messages.
+     */
+    private function executeOrFail(PDOStatement $statement, string $context): void
+    {
+        if ($statement->execute()) {
+            return;
+        }
+
+        $error = $statement->errorInfo();
+        $reason = $error[2] ?? 'unknown error';
+
+        throw new RuntimeException('Failed to execute SQL statement during ' . $context . ': ' . $reason);
     }
 
     /**
@@ -439,10 +478,10 @@ abstract class DbRecord
                . $this->quoteIdentifier($this->tableName)
                . ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?';
 
-        $st = $this->db->prepare($query);
+        $st = $this->prepareOrFail($query);
         $st->setFetchMode(PDO::FETCH_INTO, $this);
         $st->bindParam(1, $id, $this->schema[$this->primaryKey]);
-        $st->execute();
+        $this->executeOrFail($st, 'load');
 
         if (!$st->fetch()) {
             throw new RuntimeException("Error while trying to load item {$id}");
@@ -540,7 +579,7 @@ abstract class DbRecord
             $query .= ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = :__pk';
         }
 
-        $st = $this->db->prepare($query);
+        $st = $this->prepareOrFail($query);
 
         foreach ($fields as $field) {
             $value = $this->getColumnValue($field);
@@ -556,7 +595,7 @@ abstract class DbRecord
             );
         }
 
-        $st->execute();
+        $this->executeOrFail($st, $insert ? 'insert' : 'update');
 
         if (
             $insert &&
@@ -595,12 +634,12 @@ abstract class DbRecord
             return false;
         }
 
-        $st = $this->db->prepare(
+        $st = $this->prepareOrFail(
             'DELETE FROM ' . $this->quoteIdentifier($this->tableName) .
             ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?'
         );
         $st->bindValue(1, $id, $this->schema[$this->primaryKey]);
-        $st->execute();
+        $this->executeOrFail($st, 'delete');
         $this->afterDelete();
 
         return true;
