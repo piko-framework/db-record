@@ -259,7 +259,7 @@ class DbRecordTest extends TestCase
     {
         $contact = TestContext::getContainer()?->get($className);
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Item cannot be delete because it is not loaded.');
+        $this->expectExceptionMessage('Item cannot be deleted because it is not loaded.');
         $contact->delete();
     }
 

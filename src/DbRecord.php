@@ -213,7 +213,7 @@ abstract class DbRecord
     }
 
     /**
-     * Magick method to access rows's data as class attribute.
+     * Magic method to access rows's data as class attribute.
      *
      * @param string $attribute The attribute's name.
      * @return mixed The attribute's value.
@@ -225,9 +225,8 @@ abstract class DbRecord
         return $this->data[$attribute] ?? null;
     }
 
-
     /**
-     * Magick method to set row's data as class attribute.
+     * Magic method to set row's data as class attribute.
      *
      * @param string $attribute The attribute's name.
      * @param string|int|bool $value The attribute's value.
@@ -238,7 +237,7 @@ abstract class DbRecord
     {
         $this->checkColumn($attribute);
 
-        $shemaType = $this->schema[$attribute];
+        $schemaType = $this->schema[$attribute];
 
         $castBooleanValue = function ($value): bool {
             if (is_bool($value)) {
@@ -254,16 +253,16 @@ abstract class DbRecord
             return (bool) $value;
         };
 
-        $this->data[$attribute] = match ($shemaType) {
+        $this->data[$attribute] = match ($schemaType) {
             self::TYPE_INT => (int) $value,
             self::TYPE_BOOL => $castBooleanValue($value),
             self::TYPE_STRING => (string) $value,
-            default => throw new InvalidArgumentException("Unsupported type: $shemaType") // @codeCoverageIgnore
+            default => throw new InvalidArgumentException("Unsupported type: $schemaType") // @codeCoverageIgnore
         };
     }
 
     /**
-     * Magick method to check if attribute is defined in the table schema.
+     * Magic method to check if attribute is defined in the table schema.
      *
      * @param string $attribute The attribute's name.
      */
@@ -420,7 +419,7 @@ abstract class DbRecord
     public function delete(): bool
     {
         if (empty($this->{$this->primaryKey})) {
-            throw new RuntimeException("Item cannot be delete because it is not loaded.");
+            throw new RuntimeException("Item cannot be deleted because it is not loaded.");
         }
 
         if (!$this->beforeDelete()) {
