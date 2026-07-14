@@ -3,17 +3,29 @@ namespace Piko\Tests;
 
 use PDO;
 use RuntimeException;
+use DateTime;
+use DateTimeImmutable;
 use TypeError;
+use InvalidArgumentException;
 use Piko\Tests\Models\Contact;
 use Piko\Tests\Models\Contact2;
 use Piko\Tests\Models\ContactLegacy;
 use Piko\Tests\Models\ContactMapped;
+use Piko\Tests\Models\ContactBrokenTable;
+use Piko\Tests\Models\ContactAdvancedTypes;
+use Piko\Tests\Models\ContactInvalidDecimalScale;
 use Piko\Tests\Models\ContactMappedProtected;
 use Piko\Tests\Models\ContactStringPk;
+use Piko\Tests\Models\ContactDecimalAndMutableDate;
+use Piko\Tests\Models\ContactDecimalScaleTwo;
+use Piko\Tests\Models\ContactDecimalNoScale;
 use Piko\Tests\Infrastructure\TestContext;
 use PHPUnit\Framework\TestCase;
 use Piko\DbRecord\Event\BeforeSaveEvent;
 use Piko\DbRecord\Event\BeforeDeleteEvent;
+use Piko\DbRecord\Exception\SchemaException;
+use Piko\DbRecord\Exception\PersistenceException;
+use Piko\DbRecord\Exception\RecordNotFoundException;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 class DbRecordTest extends TestCase
@@ -42,7 +54,7 @@ class DbRecordTest extends TestCase
             `order` INT,
             active INT DEFAULT 0,
             active2 TINYINT DEFAULT 1,
-            income FLOAT DEFAULT 0
+            income DOUBLE DEFAULT 0
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     ';
 
@@ -158,7 +170,7 @@ class DbRecordTest extends TestCase
 
     public function testWithMissingTableName(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SchemaException::class);
         $this->expectExceptionMessage("The table name is not defined.");
 
         new class(self::getPDO()) extends \Piko\DbRecord {};
@@ -166,7 +178,7 @@ class DbRecordTest extends TestCase
 
     public function testWithMissingSchema(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SchemaException::class);
         $this->expectExceptionMessage("No table schema defined.");
 
         new class(self::getPDO()) extends \Piko\DbRecord {
@@ -185,7 +197,7 @@ class DbRecordTest extends TestCase
 
     public function testLoadWithWrongPrimaryKey(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SchemaException::class);
         $this->expectExceptionMessageMatches('/primary key contact_id is not defined/');
         $contact = TestContext::getContainer()?->get(Contact2::class);
     }
@@ -194,7 +206,7 @@ class DbRecordTest extends TestCase
     public function testWrongColumnAccess($className): void
     {
         $contact = $this->createContact($className);
-        $this->expectException(RuntimeException::class);
+        $this->expectException(SchemaException::class);
         $this->expectExceptionMessage('email is not in the table schema.');
         $contact->email;
     }
@@ -330,6 +342,20 @@ class DbRecordTest extends TestCase
         $this->assertNull($contact->firstname);
     }
 
+    public function testInsertWithProvidedStringPrimaryKey(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactStringPk::class);
+        $contact->firstname = 'pk_insert';
+        $contact->lastname = 'InsertedWithPk';
+
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactStringPk::class);
+        $reloaded->load('pk_insert');
+
+        $this->assertSame('InsertedWithPk', $reloaded->lastname);
+    }
+
     public function testUpdateWithStringZeroPrimaryKey(): void
     {
         $db = self::getPDO();
@@ -379,7 +405,7 @@ class DbRecordTest extends TestCase
         $this->assertEquals(1, $contact->id);
         $contact->delete();
 
-        $this->expectException(RuntimeException::class);
+        $this->expectException(RecordNotFoundException::class);
         $this->expectExceptionMessage('Error while trying to load item 1');
         $contact = TestContext::getContainer()?->get($className);
         $contact->load(1);
@@ -389,7 +415,7 @@ class DbRecordTest extends TestCase
     public function testDeleteNotLoaded($className): void
     {
         $contact = TestContext::getContainer()?->get($className);
-        $this->expectException(RuntimeException::class);
+        $this->expectException(RecordNotFoundException::class);
         $this->expectExceptionMessage('Item cannot be deleted because it is not loaded.');
         $contact->delete();
     }
@@ -563,5 +589,120 @@ class DbRecordTest extends TestCase
         $this->assertNull($row['name']);
         $this->assertNull($row['age']);
         $this->assertNull($row['active']);
+    }
+
+    public function testAdvancedTypesArePersistedAndLoadedWithCasting(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactAdvancedTypes::class);
+        $contact->income = 20230.95;
+        $contact->nameData = ['first' => 'Ada', 'last' => 'Lovelace'];
+        $contact->lastSeenAt = new DateTimeImmutable('2025-01-01 10:11:12');
+
+        $this->assertTrue($contact->save());
+        $this->assertSame(1, $contact->id);
+
+        $reloaded = TestContext::getContainer()?->get(ContactAdvancedTypes::class);
+        $reloaded->load(1);
+
+        $this->assertSame(20230.95, $reloaded->income);
+        $this->assertSame(['first' => 'Ada', 'last' => 'Lovelace'], $reloaded->nameData);
+        $this->assertInstanceOf(DateTimeImmutable::class, $reloaded->lastSeenAt);
+        $this->assertSame('2025-01-01 10:11:12', $reloaded->lastSeenAt?->format('Y-m-d H:i:s'));
+    }
+
+    public function testLoadThrowsSqlContextualErrorOnMissingTable(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactBrokenTable::class);
+
+        $this->expectException(PersistenceException::class);
+        $this->expectExceptionMessageMatches('/during load/');
+
+        $contact->load(1);
+    }
+
+    public function testInsertThrowsSqlContextualErrorOnMissingTable(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactBrokenTable::class);
+        $contact->firstname = 'Broken';
+
+        $this->expectException(PersistenceException::class);
+        $this->expectExceptionMessageMatches('/during insert/');
+
+        $contact->save();
+    }
+
+    public function testDeleteThrowsSqlContextualErrorOnMissingTable(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactBrokenTable::class);
+        $contact->id = 1;
+
+        $this->expectException(PersistenceException::class);
+        $this->expectExceptionMessageMatches('/during delete/');
+
+        $contact->delete();
+    }
+
+    public function testDecimalAndMutableDatetimeCasts(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactDecimalAndMutableDate::class);
+        $contact->balance = '12.3';
+        $contact->lastSeenAt = new DateTime('2025-03-04 05:06:07');
+
+        $this->assertTrue($contact->save());
+        $this->assertSame(1, $contact->id);
+
+        $reloaded = TestContext::getContainer()?->get(ContactDecimalAndMutableDate::class);
+        $reloaded->load(1);
+
+        $this->assertSame('12.3000', $reloaded->balance);
+        $this->assertInstanceOf(DateTime::class, $reloaded->lastSeenAt);
+        $this->assertSame('2025-03-04 05:06:07', $reloaded->lastSeenAt?->format('Y-m-d H:i:s'));
+    }
+
+    public function testDecimalRoundingUsesStringPrecision(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactDecimalScaleTwo::class);
+        $contact->balance = '2.675';
+
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactDecimalScaleTwo::class);
+        $reloaded->load(1);
+
+        $this->assertSame('2.68', $reloaded->balance);
+    }
+
+    public function testDecimalWithoutScaleKeepsFullPrecisionAsString(): void
+    {
+        $contact = TestContext::getContainer()?->get(ContactDecimalNoScale::class);
+        $contact->amount = '12345678901234567890.12345678901234567890';
+
+        $this->assertTrue($contact->save());
+
+        $reloaded = TestContext::getContainer()?->get(ContactDecimalNoScale::class);
+        $reloaded->load(1);
+
+        $this->assertSame('12345678901234567890.12345678901234567890', $reloaded->amount);
+    }
+
+    public function testExistsChecksPrimaryKeyPresence(): void
+    {
+        $created = TestContext::getContainer()?->get(Contact::class);
+        $created->firstname = 'Exists';
+        $created->lastname = 'Record';
+        $this->assertTrue($created->save());
+
+        $queryRecord = TestContext::getContainer()?->get(Contact::class);
+
+        $this->assertTrue($queryRecord->exists(1));
+        $this->assertFalse($queryRecord->exists(9999));
+    }
+
+    public function testDecimalScaleMustBePositiveOrZero(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Decimal scale must be greater than or equal to 0.');
+
+        TestContext::getContainer()?->get(ContactInvalidDecimalScale::class);
     }
 }

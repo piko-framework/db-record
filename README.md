@@ -82,6 +82,42 @@ class ContactMapped extends DbRecord
 
 You can then use either mapped property names (`$contact->firstName`) or underlying column names (`$contact->firstname`).
 
+### Optional: custom cast types (`float`, `decimal`, `datetime_immutable`, `datetime_mutable`, `json`)
+
+```php
+use DateTimeImmutable;
+use Piko\DbRecord;
+use Piko\DbRecord\Attribute\Table;
+use Piko\DbRecord\Attribute\Column;
+
+#[Table(name: 'contact')]
+class ContactAdvancedTypes extends DbRecord
+{
+    #[Column(primaryKey: true)]
+    public ?int $id = null;
+
+    #[Column(type: 'float')]
+    public ?float $income = null;
+
+    #[Column(name: 'name', type: 'json')]
+    public ?array $nameData = null;
+
+    #[Column(name: 'lastname', type: 'datetime_immutable')]
+    public ?DateTimeImmutable $lastSeenAt = null;
+
+    #[Column(name: 'firstname', type: 'decimal', scale: 4)]
+    public ?string $balance = null;
+}
+```
+
+- `float` values are cast to PHP `float`.
+- `decimal` values are normalized as strings. With `scale`, values are rounded/formatted to that precision.
+- `datetime_immutable` values are cast to `DateTimeImmutable`.
+- `datetime_mutable` values are cast to `DateTime`.
+- `json` values are stored as JSON strings and exposed as PHP arrays.
+
+`datetime` remains supported as an alias of `datetime_immutable` for backward compatibility.
+
 ### Optional: legacy/manual schema (including string primary keys)
 
 ```php
@@ -97,6 +133,15 @@ class ContactStringPk extends DbRecord
         'lastname'  => self::TYPE_STRING,
     ];
 }
+```
+
+With non-integer primary keys, set the key before `save()` when creating a new row:
+
+```php
+$contact = new ContactStringPk($db);
+$contact->firstname = 'pk_insert';
+$contact->lastname = 'Doe';
+$contact->save(); // INSERT with provided primary key
 ```
 
 ### Setup database connection
@@ -120,7 +165,8 @@ $db->exec($query);
 ```
 
 > Recommended: always enable `PDO::ATTR_ERRMODE = PDO::ERRMODE_EXCEPTION`.
-> DbRecord now throws explicit `RuntimeException` when `prepare()` or `execute()` fails, but exception mode still gives the clearest SQL diagnostics.
+> DbRecord throws explicit contextual exceptions when SQL operations fail (`PersistenceException` for SQL execution, `SchemaException` for mapping/schema issues, `RecordNotFoundException` for missing rows).
+> Exception mode still gives the clearest SQL diagnostics.
 
 ### Perform CRUD operations
 
@@ -144,6 +190,8 @@ echo "Contact id: {$contact->id}"; // Contact id : 1
 $contact = (new Contact($db))->load(1);
 
 var_dump($contact->firstname); // John
+
+$exists = (new Contact($db))->exists(1); // true
 ```
 
 #### Update
@@ -164,7 +212,8 @@ $contact->delete();
 - Composite primary keys are not supported.
 - `save()` updates all mapped columns (no dirty-field tracking yet).
 - For auto-increment integer primary keys, inserted IDs are filled from `PDO::lastInsertId()` when available.
-- For non-integer (e.g. string) primary keys, your application must provide the key value when needed.
+- For non-integer (e.g. string) primary keys, your application typically provides the key value.
+- `save()` performs an INSERT when the primary key is `null` or does not exist in database yet; otherwise it performs an UPDATE.
 
 ## Running tests
 

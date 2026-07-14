@@ -50,8 +50,15 @@ class Column
      *
      * @param bool $primaryKey Indicates if the field is a primary key. Default is false.
      * @param string|null $name The name of the field. Default is null.
+     * @param string|null $type Optional cast type
+     *                          (int|string|bool|float|decimal|datetime_immutable|datetime_mutable|json).
+     * @param int|null $scale Optional decimal scale (used with `decimal` cast type).
      */
-    public function __construct(public bool $primaryKey = false, public ?string $name = null)
-    {
+    public function __construct(
+        public bool $primaryKey = false,
+        public ?string $name = null,
+        public ?string $type = null,
+        public ?int $scale = null
+    ) {
     }
 }

@@ -22,6 +22,9 @@ use Piko\DbRecord;
  */
 abstract class AlterEvent extends Event
 {
+    /**
+     * @var DbRecord
+     */
     public DbRecord $record;
 
     public function __construct(DbRecord $record)

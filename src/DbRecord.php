@@ -13,14 +13,15 @@ declare(strict_types=1);
 namespace Piko;
 
 use PDO;
+use Throwable;
 use PDOStatement;
-use ReflectionClass;
-use RuntimeException;
-use ReflectionNamedType;
-use InvalidArgumentException;
-use Piko\DbRecord\Attribute\Table;
-use Piko\DbRecord\Attribute\Column;
+use Piko\DbRecord\ValueCaster;
 use Piko\DbRecord\Event\AfterSaveEvent;
+use Piko\DbRecord\Metadata;
+use Piko\DbRecord\Metadata\MetadataResolver;
+use Piko\DbRecord\Exception\SchemaException;
+use Piko\DbRecord\Exception\PersistenceException;
+use Piko\DbRecord\Exception\RecordNotFoundException;
 use Piko\DbRecord\Event\BeforeSaveEvent;
 use Piko\DbRecord\Event\AfterDeleteEvent;
 use Piko\DbRecord\Event\BeforeDeleteEvent;
@@ -31,13 +32,6 @@ use Piko\DbRecord\Event\BeforeDeleteEvent;
  *
  * @author Sylvain PHILIP <contact@sphilip.com>
  *
- * @phpstan-type Metadata array{
- *     tableName: string,
- *     schema: array<string, int>,
- *     primaryKey: string,
- *     columnToProperty: array<string, string>,
- *     propertyToColumn: array<string, string>
- * }
  */
 abstract class DbRecord
 {
@@ -73,59 +67,49 @@ abstract class DbRecord
     /**
      * Row data storage.
      *
-     * @var array<string, string|int|bool|null>
+     * @var array<string, mixed>
      */
     protected array $data = [];
 
     /**
-     * Map DB column names to model property names.
-     *
-     * @var array<string, string>
+     * Resolved metadata for the current model class.
      */
-    protected array $columnToProperty = [];
+    protected Metadata $metadata;
 
     /**
-     * Map model property names to DB column names.
-     *
-     * @var array<string, string>
+     * Metadata resolver helper.
      */
-    protected array $propertyToColumn = [];
-
-    /**
-     * Metadata cache indexed by model FQCN.
-     *
-     * @var array<class-string, Metadata>
-     */
-    private static array $metadataCache = [];
+    private MetadataResolver $metadataResolver;
 
     /**
      * Create a new record instance.
      *
      * @param PDO $db Database connection.
      *
-     * @throws RuntimeException When table name, schema, or primary key is invalid.
+     * @throws SchemaException When table name, schema, or primary key is invalid.
      */
     public function __construct(PDO $db)
     {
         $this->db = $db;
+        $this->metadataResolver = new MetadataResolver();
         $this->initializeSchema();
 
         if (empty($this->tableName)) {
-            throw new RuntimeException(
+            throw new SchemaException(
                 "The table name is not defined." .
-                " Ensure the class has a '@Table' attribute with a 'name' property."
+                " Ensure the class has a '#[Table]' attribute with a 'name' property."
             );
         }
 
         if (empty($this->schema)) {
-            throw new RuntimeException(
+            throw new SchemaException(
                 "No table schema defined." .
-                " Ensure the class has properties annotated with '@Column' attributes."
+                " Ensure the class has properties annotated with '#[Column]' attributes."
             );
         }
 
         if (!isset($this->schema[$this->primaryKey])) {
-            throw new RuntimeException("The primary key {$this->primaryKey} is not defined in the table schema");
+            throw new SchemaException("The primary key {$this->primaryKey} is not defined in the table schema");
         }
     }
 
@@ -138,7 +122,7 @@ abstract class DbRecord
      *
      * @codeCoverageIgnore
      */
-    public function quoteIdentifier($identifier): string
+    public function quoteIdentifier(string $identifier): string
     {
         $driver = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
 
@@ -154,17 +138,26 @@ abstract class DbRecord
      * Prepare a SQL statement or throw with context.
      *
      * @param string $query SQL query.
+     * @param string $context Action context for error messages.
      *
      * @return PDOStatement
      */
-    private function prepareOrFail(string $query): PDOStatement
+    private function prepareOrFail(string $query, string $context): PDOStatement
     {
-        $statement = $this->db->prepare($query);
+        try {
+            $statement = $this->db->prepare($query);
+        } catch (Throwable $exception) {
+            throw new PersistenceException(
+                'Failed to prepare SQL statement during ' . $context . ': ' . $exception->getMessage(),
+                0,
+                $exception
+            );
+        }
 
         if (!$statement instanceof PDOStatement) {
             $error = $this->db->errorInfo();
             $reason = $error[2] ?? 'unknown error';
-            throw new RuntimeException('Failed to prepare SQL statement: ' . $reason);
+            throw new PersistenceException('Failed to prepare SQL statement during ' . $context . ': ' . $reason);
         }
 
         return $statement;
@@ -178,14 +171,22 @@ abstract class DbRecord
      */
     private function executeOrFail(PDOStatement $statement, string $context): void
     {
-        if ($statement->execute()) {
-            return;
+        try {
+            if ($statement->execute()) {
+                return;
+            }
+        } catch (Throwable $exception) {
+            throw new PersistenceException(
+                'Failed to execute SQL statement during ' . $context . ': ' . $exception->getMessage(),
+                0,
+                $exception
+            );
         }
 
         $error = $statement->errorInfo();
         $reason = $error[2] ?? 'unknown error';
 
-        throw new RuntimeException('Failed to execute SQL statement during ' . $context . ': ' . $reason);
+        throw new PersistenceException('Failed to execute SQL statement during ' . $context . ': ' . $reason);
     }
 
     /**
@@ -207,33 +208,21 @@ abstract class DbRecord
     }
 
     /**
-     * Resolve an attribute name to a schema column.
+     * Resolve a schema column to a distinct, existing mapped property.
      *
-     * @param string $name Column or property name.
+     * @param string $column Schema column name.
      *
-     * @return string Schema column name.
-     *
-     * @throws RuntimeException When the name cannot be resolved to a schema column.
+     * @return string|null Property name when it differs from the column and exists, `null` otherwise.
      */
-    protected function resolveColumnName(string $name): string
+    private function getMappedProperty(string $column): ?string
     {
-        if (isset($this->schema[$name])) {
-            return $name;
+        $propertyName = $this->metadata->getPropertyName($column);
+
+        if ($propertyName !== $column && property_exists($this, $propertyName)) {
+            return $propertyName;
         }
 
-        if (isset($this->propertyToColumn[$name])) {
-            return $this->propertyToColumn[$name];
-        }
-
-        throw new RuntimeException("$name is not in the table schema.");
-    }
-
-    /**
-     * Resolve a schema column to its mapped property name.
-     */
-    protected function getPropertyName(string $column): string
-    {
-        return $this->columnToProperty[$column] ?? $column;
+        return null;
     }
 
     /**
@@ -245,99 +234,42 @@ abstract class DbRecord
      */
     protected function getColumnValue(string $column)
     {
-        $propertyName = $this->getPropertyName($column);
+        $propertyName = $this->getMappedProperty($column);
 
-        if ($propertyName !== $column && property_exists($this, $propertyName)) {
-            return $this->{$propertyName};
-        }
-
-        return $this->{$column};
+        return $propertyName !== null ? $this->{$propertyName} : $this->{$column};
     }
 
     /**
      * Initialize table metadata from `#[Table]` and `#[Column]` attributes.
-     *
-     * If attributes are present, this method resolves table name, schema types,
-     * and primary key definition through reflection.
      */
     protected function initializeSchema(): void
     {
-        $className = static::class;
+        $this->metadata = $this->metadataResolver->resolve(
+            static::class,
+            $this->tableName,
+            $this->schema,
+            $this->primaryKey
+        );
 
-        if (isset(self::$metadataCache[$className])) {
-            $metadata = self::$metadataCache[$className];
-            $this->tableName = $metadata['tableName'];
-            $this->schema = $metadata['schema'];
-            $this->primaryKey = $metadata['primaryKey'];
-            $this->columnToProperty = $metadata['columnToProperty'];
-            $this->propertyToColumn = $metadata['propertyToColumn'];
-
-            return;
-        }
-
-        $reflectionClass = new ReflectionClass($this);
-
-        $tableAttribute = $reflectionClass->getAttributes(Table::class)[0] ?? null;
-
-        if ($tableAttribute) {
-            $this->tableName = $tableAttribute->newInstance()->name;
-        }
-
-        foreach ($reflectionClass->getProperties() as $property) {
-
-            $fieldAttribute = $property->getAttributes(Column::class)[0] ?? null;
-
-            if ($fieldAttribute) {
-                $fieldInstance = $fieldAttribute->newInstance();
-                $propertyName = $property->getName();
-                $fieldName = $fieldInstance->name ?? $propertyName;
-                $propertyType = $property->getType();
-                // Default type to string if no type is declared
-                $type = $propertyType instanceof ReflectionNamedType ? $propertyType->getName() : 'string';
-
-                $this->schema[$fieldName] = $this->getSchemaType($type);
-                $this->columnToProperty[$fieldName] = $propertyName;
-                $this->propertyToColumn[$propertyName] = $fieldName;
-
-                if ($fieldInstance->primaryKey) {
-                    $this->primaryKey = $fieldName;
-                }
-            }
-        }
-
-        foreach (array_keys($this->schema) as $columnName) {
-            $propertyName = $this->columnToProperty[$columnName] ?? $columnName;
-            $this->columnToProperty[$columnName] = $propertyName;
-            $this->propertyToColumn[$propertyName] = $columnName;
-        }
-
-        self::$metadataCache[$className] = [
-            'tableName' => $this->tableName,
-            'schema' => $this->schema,
-            'primaryKey' => $this->primaryKey,
-            'columnToProperty' => $this->columnToProperty,
-            'propertyToColumn' => $this->propertyToColumn,
-        ];
+        $this->tableName = $this->metadata->tableName;
+        $this->schema = $this->metadata->schema;
+        $this->primaryKey = $this->metadata->primaryKey;
     }
 
     /**
-     * Map a PHP property type to a PDO parameter type.
+     * Assign a casted value to both internal data and mapped property when available.
      *
-     * @param string $type PHP type name.
-     *
-     * @return int One of the `PDO::PARAM_*` constants.
-     *
-     * @throws InvalidArgumentException When the type is not supported.
+     * @param string $column Schema column name.
+     * @param mixed $value Casted value.
      */
-    private function getSchemaType(string $type): int
+    private function assignColumnValue(string $column, mixed $value): void
     {
-        return match ($type) {
-            'int' => self::TYPE_INT,
-            'string' => self::TYPE_STRING,
-            'bool' => self::TYPE_BOOL,
-            'float' => self::TYPE_STRING,
-            default => throw new InvalidArgumentException("Unsupported type: $type"),
-        };
+        $this->data[$column] = $value;
+        $propertyName = $this->metadata->getPropertyName($column);
+
+        if (property_exists($this, $propertyName)) {
+            $this->{$propertyName} = $value;
+        }
     }
 
     /**
@@ -358,6 +290,23 @@ abstract class DbRecord
     }
 
     /**
+     * Normalize and bind a column value to a prepared statement.
+     *
+     * @param PDOStatement $statement Prepared statement.
+     * @param string $placeholder Named placeholder (e.g. `:name`).
+     * @param string $column Schema column name.
+     */
+    private function bindColumnValue(PDOStatement $statement, string $placeholder, string $column): void
+    {
+        $value = ValueCaster::normalizeForDatabase(
+            $this->getColumnValue($column),
+            $this->metadata->getCastTypeForColumn($column),
+            $this->metadata->getDecimalScaleForColumn($column)
+        );
+        $statement->bindValue($placeholder, $value, $this->getParameterType($this->schema[$column], $value));
+    }
+
+    /**
      * Magic getter for schema-defined attributes.
      *
      * @param string $attribute Attribute name.
@@ -366,19 +315,15 @@ abstract class DbRecord
      */
     public function __get(string $attribute)
     {
-        $column = $this->resolveColumnName($attribute);
+        $column = $this->metadata->resolveColumnName($attribute);
 
         if (array_key_exists($column, $this->data)) {
             return $this->data[$column];
         }
 
-        $propertyName = $this->getPropertyName($column);
+        $propertyName = $this->getMappedProperty($column);
 
-        if ($propertyName !== $column && property_exists($this, $propertyName)) {
-            return $this->{$propertyName};
-        }
-
-        return null;
+        return $propertyName !== null ? $this->{$propertyName} : null;
     }
 
     /**
@@ -389,55 +334,19 @@ abstract class DbRecord
      * @param string $attribute Attribute name.
      * @param string|int|bool|null $value Attribute value.
      *
-     * @throws RuntimeException When the attribute is not in the schema.
-     * @throws InvalidArgumentException When schema type is unsupported.
+     * @throws SchemaException When the attribute is not in the schema.
+     * @throws \InvalidArgumentException When schema type is unsupported.
      */
     public function __set(string $attribute, $value): void
     {
-        $column = $this->resolveColumnName($attribute);
+        $column = $this->metadata->resolveColumnName($attribute);
 
-        if ($value === null) {
-            $this->data[$column] = null;
-
-            $propertyName = $this->getPropertyName($column);
-
-            if ($propertyName !== $column && property_exists($this, $propertyName)) {
-                $this->{$propertyName} = null;
-            }
-
-            return;
-        }
-
-        $schemaType = $this->schema[$column];
-
-        $castBooleanValue = function ($value): bool {
-            if (is_bool($value)) {
-                return $value;
-            }
-
-            $filtered = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-
-            if ($filtered !== null) {
-                return $filtered;
-            }
-
-            return (bool) $value;
-        };
-
-        $castValue = match ($schemaType) {
-            self::TYPE_INT => (int) $value,
-            self::TYPE_BOOL => $castBooleanValue($value),
-            self::TYPE_STRING => (string) $value,
-            default => throw new InvalidArgumentException("Unsupported type: $schemaType") // @codeCoverageIgnore
-        };
-
-        $this->data[$column] = $castValue;
-
-        $propertyName = $this->getPropertyName($column);
-
-        if ($propertyName !== $column && property_exists($this, $propertyName)) {
-            $this->{$propertyName} = $castValue;
-        }
+        $castValue = ValueCaster::cast(
+            $value,
+            $this->metadata->getCastTypeForColumn($column),
+            $this->metadata->getDecimalScaleForColumn($column)
+        );
+        $this->assignColumnValue($column, $castValue);
     }
 
     /**
@@ -447,7 +356,26 @@ abstract class DbRecord
      */
     public function __isset(string $attribute): bool
     {
-        return isset($this->schema[$attribute]) || isset($this->propertyToColumn[$attribute]);
+        return $this->metadata->hasAttribute($attribute);
+    }
+
+    /**
+     * Check whether a row exists for a primary key.
+     *
+     * @param int|string $id Primary key value.
+     *
+     * @return bool
+     */
+    public function exists(int|string $id): bool
+    {
+        $query = 'SELECT 1 FROM ' . $this->quoteIdentifier($this->tableName)
+               . ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?';
+
+        $statement = $this->prepareOrFail($query, 'exists');
+        $statement->bindValue(1, $id, $this->schema[$this->primaryKey]);
+        $this->executeOrFail($statement, 'exists');
+
+        return $statement->fetchColumn() !== false;
     }
 
     /**
@@ -457,34 +385,36 @@ abstract class DbRecord
      *
      * @return static
      *
-     * @throws RuntimeException When no row matches the given primary key.
+     * @throws RecordNotFoundException When no row matches the given primary key.
      */
     public function load(int|string $id = 0): static
     {
-        $cols = [];
-
-        foreach (array_keys($this->schema) as $columnName) {
-            $quotedColumnName = $this->quoteIdentifier($columnName);
-            $propertyName = $this->getPropertyName($columnName);
-
-            if ($propertyName !== $columnName) {
-                $cols[] = $quotedColumnName . ' AS ' . $this->quoteIdentifier($propertyName);
-            } else {
-                $cols[] = $quotedColumnName;
-            }
-        }
+        $cols = array_map(
+            fn(string $columnName): string => $this->quoteIdentifier($columnName),
+            array_keys($this->schema)
+        );
 
         $query = 'SELECT ' . implode(', ', $cols) . ' FROM '
                . $this->quoteIdentifier($this->tableName)
                . ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?';
 
-        $st = $this->prepareOrFail($query);
-        $st->setFetchMode(PDO::FETCH_INTO, $this);
+        $st = $this->prepareOrFail($query, 'load');
         $st->bindParam(1, $id, $this->schema[$this->primaryKey]);
         $this->executeOrFail($st, 'load');
 
-        if (!$st->fetch()) {
-            throw new RuntimeException("Error while trying to load item {$id}");
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        if (!is_array($row)) {
+            throw new RecordNotFoundException("Error while trying to load item {$id}");
+        }
+
+        foreach ($row as $column => $value) {
+            $castValue = ValueCaster::cast(
+                $value,
+                $this->metadata->getCastTypeForColumn($column),
+                $this->metadata->getDecimalScaleForColumn($column)
+            );
+            $this->assignColumnValue($column, $castValue);
         }
 
         return $this;
@@ -537,26 +467,31 @@ abstract class DbRecord
     /**
      * Persist the current record.
      *
-     * Inserts when the primary key is `null`, otherwise updates the row.
+     * Inserts when the primary key is `null` or when the record doesn't exists,
+     * otherwise updates the row.
      *
      * @return bool `true` on success, `false` when blocked by `beforeSave()`.
      */
     public function save(): bool
     {
-        $insert = $this->getColumnValue($this->primaryKey) === null;
+        $primaryKeyValue = $this->getColumnValue($this->primaryKey);
+        $insert = $primaryKeyValue === null || !$this->exists(ValueCaster::toString($primaryKeyValue));
 
         if (!$this->beforeSave($insert)) {
             return false;
         }
 
-        $fields = array_keys($this->schema);
         $valueKeys = [];
 
-        $primaryKeyIndex = array_search($this->primaryKey, $fields);
+        // For INSERT, include primary key only when explicitly provided (e.g. string/UUID keys).
+        // For UPDATE, primary key is always excluded from SET and bound separately in WHERE.
+        $fields = array_keys($this->schema);
 
-        // Remove the primary key from the fields array
-        if ($primaryKeyIndex !== false) {
-            unset($fields[$primaryKeyIndex]);
+        if (!$insert || $primaryKeyValue === null) {
+            $fields = array_values(array_filter(
+                $fields,
+                fn(string $field): bool => $field !== $this->primaryKey
+            ));
         }
 
         if ($insert) {
@@ -579,20 +514,14 @@ abstract class DbRecord
             $query .= ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = :__pk';
         }
 
-        $st = $this->prepareOrFail($query);
+        $st = $this->prepareOrFail($query, $insert ? 'insert' : 'update');
 
         foreach ($fields as $field) {
-            $value = $this->getColumnValue($field);
-            $st->bindValue(':' . $field, $value, $this->getParameterType($this->schema[$field], $value));
+            $this->bindColumnValue($st, ':' . $field, $field);
         }
 
         if (!$insert) {
-            $primaryKeyValue = $this->getColumnValue($this->primaryKey);
-            $st->bindValue(
-                ':__pk',
-                $primaryKeyValue,
-                $this->getParameterType($this->schema[$this->primaryKey], $primaryKeyValue)
-            );
+            $this->bindColumnValue($st, ':__pk', $this->primaryKey);
         }
 
         $this->executeOrFail($st, $insert ? 'insert' : 'update');
@@ -605,7 +534,7 @@ abstract class DbRecord
             $lastInsertId = $this->db->lastInsertId();
 
             if ($lastInsertId !== false && $lastInsertId !== '') {
-                $primaryKeyProperty = $this->getPropertyName($this->primaryKey);
+                $primaryKeyProperty = $this->metadata->getPropertyName($this->primaryKey);
                 $this->{$primaryKeyProperty} = (int) $lastInsertId;
             }
         }
@@ -620,14 +549,14 @@ abstract class DbRecord
      *
      * @return bool `true` on success, `false` when blocked by `beforeDelete()`.
      *
-     * @throws RuntimeException When the record is not loaded.
+     * @throws RecordNotFoundException When the record is not loaded.
      */
     public function delete(): bool
     {
         $id = $this->getColumnValue($this->primaryKey);
 
         if ($id === null) {
-            throw new RuntimeException("Item cannot be deleted because it is not loaded.");
+            throw new RecordNotFoundException("Item cannot be deleted because it is not loaded.");
         }
 
         if (!$this->beforeDelete()) {
@@ -636,9 +565,15 @@ abstract class DbRecord
 
         $st = $this->prepareOrFail(
             'DELETE FROM ' . $this->quoteIdentifier($this->tableName) .
-            ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?'
+            ' WHERE ' . $this->quoteIdentifier($this->primaryKey) . ' = ?',
+            'delete'
         );
-        $st->bindValue(1, $id, $this->schema[$this->primaryKey]);
+        $dbId = ValueCaster::normalizeForDatabase(
+            $id,
+            $this->metadata->getCastTypeForColumn($this->primaryKey),
+            $this->metadata->getDecimalScaleForColumn($this->primaryKey)
+        );
+        $st->bindValue(1, $dbId, $this->schema[$this->primaryKey]);
         $this->executeOrFail($st, 'delete');
         $this->afterDelete();
 
